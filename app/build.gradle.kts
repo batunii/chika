@@ -6,12 +6,12 @@ plugins {
 }
 
 android {
-    namespace = "com.napkin.comicreader"
+    namespace = "com.chakra.comicreader"
     compileSdk = 36
     buildToolsVersion = "36.1.0"
 
     defaultConfig {
-        applicationId = "com.napkin.comicreader"
+        applicationId = "com.chakra.comicreader"
         minSdk = 26
         targetSdk = 36
         versionCode = 1
