@@ -41,6 +41,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -213,6 +214,9 @@ private fun PageViewer(
     LaunchedEffect(state.pageIndex, state.slot) {
         userScale = 1f; userPanX = 0f; userPanY = 0f
     }
+    // The camera already magnifies when framing a panel, so a panel view counts as "zoomed" for
+    // gesture purposes (drag pans the canvas). Read live inside the long-lived gesture handler.
+    val isFullPage by rememberUpdatedState(state.isFullPageView)
 
     Box(
         modifier = Modifier
@@ -238,12 +242,22 @@ private fun PageViewer(
                             pastSlop = true
                         }
                         if (pastSlop) {
-                            // Apply zoom/pan only once zoomed in (otherwise the drag is a page swipe).
                             val newScale = (userScale * zoomChange).coerceIn(1f, 5f)
                             userScale = newScale
-                            if (newScale > 1f) {
-                                userPanX += panChange.x
-                                userPanY += panChange.y
+                            // Pannable when manually zoomed OR auto-zoomed into a panel (the camera
+                            // magnifies the page, so the rest of the canvas is off-screen to pan to).
+                            if (newScale > 1f || !isFullPage) {
+                                // Clamp the pan so the magnified artwork can't be flung off-screen.
+                                val draw = computePageDraw(
+                                    camera.value, image.width, image.height,
+                                    size.width.toFloat(), size.height.toFloat(),
+                                )
+                                val cw = size.width.toFloat()
+                                val ch = size.height.toFloat()
+                                val baseLeft = cw / 2f + (draw.left - cw / 2f) * newScale
+                                val baseTop = ch / 2f + (draw.top - ch / 2f) * newScale
+                                userPanX = clampPan(userPanX + panChange.x, baseLeft, draw.scaledWidth * newScale, cw)
+                                userPanY = clampPan(userPanY + panChange.y, baseTop, draw.scaledHeight * newScale, ch)
                             } else {
                                 userPanX = 0f; userPanY = 0f
                             }
@@ -258,7 +272,9 @@ private fun PageViewer(
                             down.position.x > w * 2f / 3f -> onNext()
                             else -> onToggleChrome()
                         }
-                        maxPointers == 1 && userScale <= 1.01f -> { // a single-finger swipe
+                        // Swipe turns the page only from the (unzoomed) full-page view; in a panel
+                        // view a one-finger drag pans the canvas instead.
+                        maxPointers == 1 && userScale <= 1.01f && isFullPage -> {
                             val threshold = w * 0.15f
                             if (pan.x <= -threshold) { if (rtl) onPrevPage() else onNextPage() }
                             else if (pan.x >= threshold) { if (rtl) onNextPage() else onPrevPage() }
@@ -308,6 +324,16 @@ private fun ErrorView(message: String) {
             style = MaterialTheme.typography.bodyLarge,
         )
     }
+}
+
+/**
+ * Clamps a pan offset so the scaled image stays covering the screen: when the image is larger than
+ * the container it can pan until an edge meets the screen edge; when smaller it's centered (no pan).
+ * [base] is the image's left/top at zero pan, [size] its scaled width/height, [container] the screen.
+ */
+private fun clampPan(pan: Float, base: Float, size: Float, container: Float): Float {
+    if (size <= container) return (container - size) / 2f - base
+    return pan.coerceIn(container - size - base, -base)
 }
 
 private fun pageStatus(state: ReaderUiState): String {
