@@ -1,0 +1,13 @@
+<resources>
+    <string name="app_name">Comic Reader</string>
+    <string name="library_title">My Comics</string>
+    <string name="add_comic">Add comic</string>
+    <string name="empty_library">No comics yet.\nTap + to add a CBZ or CBR file.</string>
+    <string name="importing">Importing…</string>
+    <string name="loading">Loading…</string>
+    <string name="unsupported_file">Unsupported file. Pick a .cbz or .cbr.</string>
+    <string name="delete">Delete</string>
+    <string name="delete_comic_title">Remove comic?</string>
+    <string name="delete_comic_message">This removes the imported copy from the app. The original file is untouched.</string>
+    <string name="cancel">Cancel</string>
+</resources>
