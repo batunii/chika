@@ -1,0 +1,20 @@
+/* Chika · Chitra Katha — brand tokens */
+:root {
+  --ink: #17100E;
+  --ink-soft: #2A201C;
+  --crimson: #D11F2D;
+  --crimson-bright: #E62534;
+  --maroon: #7C1620;
+  --maroon-deep: #5C0F18;
+  --cream: #F3E9D6;
+  --paper: #FAF3E4;
+  --ochre: #E0A22B;
+}
+.anton { font-family: 'Anton', sans-serif; font-weight: 400; }
+.archivo { font-family: 'Archivo', sans-serif; }
+.baloo { font-family: 'Baloo 2', sans-serif; }
+.halftone-bg {
+  background-image: radial-gradient(currentColor 1.6px, transparent 1.7px);
+  background-size: 9px 9px;
+}
+* { -webkit-tap-highlight-color: transparent; }

@@ -108,6 +108,13 @@ class ReaderViewModel(
         if (s.pageIndex > 0) goToPage(s.pageIndex - 1, targetSlot = 0)
     }
 
+    /** Zoom back out to the whole current page (full-page view). */
+    fun showFullPage() {
+        val s = _state.value
+        if (s.loading || s.error != null) return
+        if (s.slot != 0) setSlot(0)
+    }
+
     /** Jump directly to a page (from the scrubber), landing on its full-page view. */
     fun jumpToPage(page: Int) {
         val s = _state.value

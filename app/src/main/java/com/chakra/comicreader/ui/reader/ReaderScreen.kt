@@ -12,6 +12,13 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.calculatePan
@@ -25,6 +32,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.SwapHoriz
+import androidx.compose.material.icons.filled.ZoomOutMap
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -54,8 +62,23 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
+import androidx.compose.material3.SliderDefaults
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.chakra.comicreader.detection.Panel
+import com.chakra.comicreader.ui.brand.PageCoin
+import com.chakra.comicreader.ui.brand.Reticle
+import com.chakra.comicreader.ui.theme.Anton
+import com.chakra.comicreader.ui.theme.Archivo
+import com.chakra.comicreader.ui.theme.Cream
+import com.chakra.comicreader.ui.theme.CreamMuted
+import com.chakra.comicreader.ui.theme.Crimson
+import com.chakra.comicreader.ui.theme.Ink
+import com.chakra.comicreader.ui.theme.Ochre
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
@@ -91,45 +114,58 @@ fun ReaderScreen(
             )
         }
 
+        // Faint reticle brackets framing the viewport (comic identity), under the chrome.
+        if (state.error == null && state.page != null) {
+            Reticle(
+                modifier = Modifier.matchParentSize().padding(6.dp),
+                color = Crimson.copy(alpha = 0.45f),
+                inset = 6.dp,
+                length = 16.dp,
+                stroke = 2.dp,
+            )
+        }
+
         AnimatedVisibility(
             visible = chromeVisible,
             enter = slideInVertically { -it } + fadeIn(),
             exit = slideOutVertically { -it } + fadeOut(),
             modifier = Modifier.align(Alignment.TopCenter),
         ) {
-            TopAppBar(
-                title = {
-                    Column {
-                        Text(
-                            state.title,
-                            maxLines = 1,
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.SemiBold,
-                        )
-                        Text(
-                            text = pageStatus(state),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
-                        )
-                    }
-                },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-                    }
-                },
-                actions = {
-                    IconButton(onClick = viewModel::toggleReadingDirection) {
-                        Icon(
-                            Icons.Default.SwapHoriz,
-                            contentDescription = if (state.rightToLeft) "Right-to-left" else "Left-to-right",
-                        )
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f),
-                ),
-            )
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(Brush.verticalGradient(listOf(Ink.copy(alpha = 0.94f), Color.Transparent)))
+                    .statusBarsPadding()
+                    .padding(start = 12.dp, end = 6.dp, top = 8.dp, bottom = 18.dp),
+            ) {
+                Box(
+                    Modifier.size(38.dp).clip(CircleShape).background(Cream.copy(alpha = 0.12f))
+                        .clickable(onClick = onBack),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        Icons.AutoMirrored.Filled.ArrowBack, "Back",
+                        tint = Cream, modifier = Modifier.size(18.dp),
+                    )
+                }
+                Spacer(Modifier.size(12.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        state.title, fontFamily = Archivo, fontWeight = FontWeight.ExtraBold,
+                        fontSize = 14.sp, color = Cream, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        pageStatus(state), fontFamily = Archivo, fontWeight = FontWeight.SemiBold,
+                        fontSize = 9.sp, letterSpacing = 1.4.sp, color = CreamMuted,
+                        modifier = Modifier.padding(top = 2.dp),
+                    )
+                }
+                IconButton(onClick = viewModel::showFullPage) {
+                    Icon(Icons.Default.ZoomOutMap, contentDescription = "Show whole page", tint = Cream)
+                }
+                DirectionChip(rightToLeft = state.rightToLeft, onClick = viewModel::toggleReadingDirection)
+            }
         }
 
         AnimatedVisibility(
@@ -156,30 +192,43 @@ private fun PageScrubber(
     var scrubbing by remember { mutableStateOf(false) }
     var scrub by remember { mutableFloatStateOf(pageIndex.toFloat()) }
     LaunchedEffect(pageIndex) { if (!scrubbing) scrub = pageIndex.toFloat() }
+    val shownPage = (if (scrubbing) scrub.roundToInt() else pageIndex) + 1
 
-    Surface(color = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f)) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .navigationBarsPadding()
-                .padding(horizontal = 20.dp, vertical = 6.dp),
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(Brush.verticalGradient(listOf(Color.Transparent, Ink.copy(alpha = 0.97f))))
+            .navigationBarsPadding()
+            .padding(start = 20.dp, end = 20.dp, top = 24.dp, bottom = 12.dp),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                text = "Page ${(if (scrubbing) scrub.roundToInt() else pageIndex) + 1} / $pageCount",
-                style = MaterialTheme.typography.labelMedium,
-                modifier = Modifier.fillMaxWidth(),
-                textAlign = TextAlign.Center,
+                "SWIPE TO TURN",
+                fontFamily = Anton,
+                fontSize = 12.sp,
+                letterSpacing = 2.sp,
+                color = CreamMuted,
             )
-            Slider(
-                value = scrub.coerceIn(0f, (pageCount - 1).toFloat()),
-                onValueChange = { scrubbing = true; scrub = it },
-                onValueChangeFinished = {
-                    scrubbing = false
-                    onJumpToPage(scrub.roundToInt())
-                },
-                valueRange = 0f..(pageCount - 1).toFloat(),
-            )
+            PageCoin(page = shownPage, total = pageCount)
         }
+        Slider(
+            value = scrub.coerceIn(0f, (pageCount - 1).toFloat()),
+            onValueChange = { scrubbing = true; scrub = it },
+            onValueChangeFinished = {
+                scrubbing = false
+                onJumpToPage(scrub.roundToInt())
+            },
+            valueRange = 0f..(pageCount - 1).toFloat(),
+            colors = SliderDefaults.colors(
+                thumbColor = Ochre,
+                activeTrackColor = Ochre,
+                inactiveTrackColor = Cream.copy(alpha = 0.2f),
+            ),
+        )
     }
 }
 
@@ -334,6 +383,30 @@ private fun ErrorView(message: String) {
 private fun clampPan(pan: Float, base: Float, size: Float, container: Float): Float {
     if (size <= container) return (container - size) / 2f - base
     return pan.coerceIn(container - size - base, -base)
+}
+
+/** Reading-direction control that shows its current state (LTR/RTL) so its purpose is obvious. */
+@Composable
+private fun DirectionChip(rightToLeft: Boolean, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .clip(CircleShape)
+            .background(Cream.copy(alpha = 0.12f))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 10.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(5.dp),
+    ) {
+        Icon(Icons.Default.SwapHoriz, contentDescription = null, tint = Cream, modifier = Modifier.size(15.dp))
+        Text(
+            if (rightToLeft) "RTL" else "LTR",
+            fontFamily = Archivo,
+            fontWeight = FontWeight.Bold,
+            fontSize = 11.sp,
+            letterSpacing = 1.sp,
+            color = Cream,
+        )
+    }
 }
 
 private fun pageStatus(state: ReaderUiState): String {

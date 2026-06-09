@@ -1,38 +1,41 @@
 package com.chakra.comicreader.ui.theme
 
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
-import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.graphics.Color
 
-private val DarkColors = darkColorScheme(
-    primary = Color(0xFF9EC3FF),
-    onPrimary = Color(0xFF00315C),
-    secondary = Color(0xFFF2C14E),
-    background = Color(0xFF101012),
-    onBackground = Color(0xFFE7E7EC),
-    surface = Color(0xFF1B1B1F),
-    onSurface = Color(0xFFE7E7EC),
-    surfaceVariant = Color(0xFF26262B),
-)
-
-private val LightColors = lightColorScheme(
-    primary = Color(0xFF1F5FBF),
-    secondary = Color(0xFFB07D1A),
-    background = Color(0xFFFAFAFC),
-    surface = Color(0xFFFFFFFF),
+/**
+ * Chika is a dark, ink-grounded comic reader, so the theme is always the brand dark scheme
+ * (no system light/dark switch). Material colors map onto the brand palette so stock components
+ * pick up the identity; bespoke comic styling lives in the brand component kit.
+ */
+private val ChikaColorScheme = darkColorScheme(
+    primary = Crimson,
+    onPrimary = Cream,
+    primaryContainer = Maroon,
+    onPrimaryContainer = Cream,
+    secondary = Ochre,
+    onSecondary = Ink,
+    secondaryContainer = Ochre,
+    onSecondaryContainer = Ink,
+    tertiary = CrimsonBright,
+    onTertiary = Cream,
+    background = Ink,
+    onBackground = Cream,
+    surface = Ink,
+    onSurface = Cream,
+    surfaceVariant = InkSoft,
+    onSurfaceVariant = CreamMuted,
+    outline = CreamMuted,
+    error = CrimsonBright,
+    onError = Cream,
 )
 
 @Composable
-fun ComicReaderTheme(
-    darkTheme: Boolean = isSystemInDarkTheme(),
-    content: @Composable () -> Unit,
-) {
+fun ComicReaderTheme(content: @Composable () -> Unit) {
     MaterialTheme(
-        colorScheme = if (darkTheme) DarkColors else LightColors,
-        typography = MaterialTheme.typography,
+        colorScheme = ChikaColorScheme,
+        typography = ChikaTypography,
         content = content,
     )
 }
