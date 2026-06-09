@@ -1,0 +1,668 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Chika · Chitra Katha — Logo Explorations</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Anton&family=Archivo:wght@400;500;600;700;800;900&family=Baloo+2:wght@500;600;700;800&family=Bungee&display=swap" rel="stylesheet" />
+<style>
+  html, body { margin: 0; padding: 0; }
+  * { box-sizing: border-box; }
+
+  :root {
+    --ink: #17100E;
+    --ink-soft: #2A201C;
+    --crimson: #D11F2D;
+    --crimson-bright: #E62534;
+    --maroon: #7C1620;
+    --maroon-deep: #5C0F18;
+    --cream: #F3E9D6;
+    --paper: #FAF3E4;
+    --ochre: #E0A22B;
+  }
+
+  /* ---- reusable comic primitives ---- */
+  .logo-fill {
+    width: 100%; height: 100%;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    position: relative; overflow: hidden;
+    user-select: none;
+  }
+  .halftone {
+    position: absolute; inset: 0;
+    background-image: radial-gradient(currentColor 1.6px, transparent 1.7px);
+    background-size: 9px 9px;
+    opacity: 0.18;
+    pointer-events: none;
+  }
+  .halftone-fade {
+    -webkit-mask-image: linear-gradient(135deg, #000 0%, transparent 62%);
+            mask-image: linear-gradient(135deg, #000 0%, transparent 62%);
+  }
+  /* chunky Ben-Day comic dots */
+  .bende {
+    position: absolute; inset: 0; pointer-events: none;
+    background-image: radial-gradient(currentColor 3.1px, transparent 3.5px);
+    background-size: 14px 14px;
+  }
+  .bende-fade {
+    -webkit-mask-image: radial-gradient(120% 120% at 100% 100%, #000 30%, transparent 78%);
+            mask-image: radial-gradient(120% 120% at 100% 100%, #000 30%, transparent 78%);
+  }
+  /* comic SFX onomatopoeia lettering — bold, outlined */
+  .sfx-word {
+    font-family: 'Baloo 2', sans-serif;
+    font-weight: 800;
+    line-height: 0.9;
+    paint-order: stroke fill;
+    text-align: center;
+  }
+
+  .chika-anton { font-family: 'Anton', sans-serif; font-weight: 400; letter-spacing: 0.01em; }
+  .chika-bungee { font-family: 'Bungee', sans-serif; }
+  .baloo { font-family: 'Baloo 2', sans-serif; }
+  .archivo { font-family: 'Archivo', sans-serif; }
+
+  .sub-label {
+    font-family: 'Archivo', sans-serif;
+    font-weight: 800;
+    text-transform: uppercase;
+  }
+
+  /* focus reticle corner brackets */
+  .reticle { position: absolute; inset: 0; pointer-events: none; }
+  .reticle span {
+    position: absolute; width: 22px; height: 22px;
+    border: 3px solid var(--crimson);
+  }
+  .reticle .tl { top: 16px; left: 16px; border-right: 0; border-bottom: 0; }
+  .reticle .tr { top: 16px; right: 16px; border-left: 0; border-bottom: 0; }
+  .reticle .bl { bottom: 16px; left: 16px; border-right: 0; border-top: 0; }
+  .reticle .br { bottom: 16px; right: 16px; border-left: 0; border-top: 0; }
+
+  /* speech bubble */
+  .bubble {
+    position: relative;
+    background: var(--crimson);
+    border: 4px solid var(--ink);
+    border-radius: 22px;
+    padding: 18px 34px 22px;
+    box-shadow: 7px 7px 0 var(--ink);
+  }
+  .bubble::after {
+    content: "";
+    position: absolute;
+    left: 40px; bottom: -26px;
+    width: 0; height: 0;
+    border-left: 0 solid transparent;
+    border-right: 30px solid transparent;
+    border-top: 28px solid var(--crimson);
+    filter: drop-shadow(3px 4px 0 var(--ink));
+  }
+
+  /* panel frame */
+  .panel-frame {
+    border: 5px solid var(--ink);
+    background: var(--paper);
+    box-shadow: 8px 8px 0 var(--ink);
+    position: relative;
+  }
+
+  .icon-tile {
+    width: 100%; height: 100%;
+    display: flex; align-items: center; justify-content: center;
+    position: relative; overflow: hidden;
+    border-radius: 44px;
+  }
+
+  .frame-cap {
+    font-family: 'Archivo', sans-serif;
+    font-size: 11px; font-weight: 700;
+    letter-spacing: 0.14em; text-transform: uppercase;
+    color: #8a8178;
+  }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<script type="text/babel" src="design-canvas.jsx"></script>
+<script type="text/babel">
+// ============================================================
+//  Chika · Chitra Katha — logo explorations (inlined)
+// ============================================================
+
+// 01 · Stacked Classic
+function StackedClassic() {
+  return (
+    <div className="logo-fill" style={{ background: 'var(--paper)' }}>
+      <div className="halftone halftone-fade" style={{ color: 'var(--maroon)' }} />
+      <div style={{ textAlign: 'center', lineHeight: 0.86 }}>
+        <div className="chika-anton" style={{ fontSize: 96, color: 'var(--ink)' }}>
+          CHIK<span style={{ color: 'var(--crimson)' }}>A</span>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 14, marginTop: 18 }}>
+          <span style={{ height: 3, width: 38, background: 'var(--crimson)' }} />
+          <span className="sub-label" style={{ fontSize: 18, letterSpacing: '0.32em', color: 'var(--maroon)' }}>CHITRA KATHA</span>
+          <span style={{ height: 3, width: 38, background: 'var(--crimson)' }} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// 02 · Speech Bubble
+function SpeechBubble() {
+  return (
+    <div className="logo-fill" style={{ background: 'var(--ink)' }}>
+      <div className="halftone" style={{ color: '#fff', opacity: 0.06 }} />
+      <div className="bubble">
+        <span className="chika-bungee" style={{ fontSize: 56, color: 'var(--cream)', lineHeight: 1 }}>CHIKA</span>
+      </div>
+      <div className="sub-label" style={{ marginTop: 40, fontSize: 15, letterSpacing: '0.4em', color: 'var(--cream)' }}>CHITRA&nbsp;&nbsp;KATHA</div>
+    </div>
+  );
+}
+
+// 03 · Halftone Pop
+function HalftonePop() {
+  return (
+    <div className="logo-fill" style={{ background: 'var(--crimson)' }}>
+      <div className="halftone halftone-fade" style={{ color: 'var(--ink)', opacity: 0.28 }} />
+      <div style={{ position: 'relative', textAlign: 'center' }}>
+        <div className="chika-anton" style={{ fontSize: 104, lineHeight: 0.9, color: 'var(--cream)', textShadow: '5px 5px 0 var(--maroon-deep)' }}>CHIKA</div>
+        <div className="baloo" style={{ fontSize: 34, fontWeight: 700, color: 'var(--ink)', marginTop: 6, lineHeight: 1 }}>चित्र कथा</div>
+      </div>
+    </div>
+  );
+}
+
+// 04 · Panel Frame
+function PanelFrame() {
+  return (
+    <div className="logo-fill" style={{ background: 'var(--ink)' }}>
+      <div className="panel-frame" style={{ padding: 0, display: 'flex' }}>
+        <div style={{ padding: '26px 30px 28px', background: 'var(--paper)', borderRight: '5px solid var(--ink)', position: 'relative', overflow: 'hidden' }}>
+          <div className="halftone halftone-fade" style={{ color: 'var(--crimson)', opacity: 0.22 }} />
+          <div className="chika-anton" style={{ fontSize: 76, color: 'var(--ink)', lineHeight: 0.9, position: 'relative' }}>
+            CHI<span style={{ color: 'var(--crimson)' }}>KA</span>
+          </div>
+          <div className="sub-label" style={{ fontSize: 12.5, letterSpacing: '0.26em', color: 'var(--maroon)', marginTop: 8, position: 'relative' }}>CHITRA KATHA</div>
+        </div>
+        <div style={{ width: 46, background: 'var(--crimson)', position: 'relative', overflow: 'hidden', display: 'flex', alignItems: 'flex-end', justifyContent: 'center', paddingBottom: 12 }}>
+          <div className="halftone" style={{ color: 'var(--ink)', opacity: 0.3 }} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// 05 · Ink Stamp Badge
+function StampBadge() {
+  return (
+    <div className="logo-fill" style={{ background: 'var(--maroon)' }}>
+      <div className="halftone" style={{ color: 'var(--ink)', opacity: 0.16 }} />
+      <div style={{ width: 248, height: 248, borderRadius: '50%', border: '4px solid var(--cream)', display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative' }}>
+        <div style={{ position: 'absolute', inset: 12, borderRadius: '50%', border: '2px solid var(--crimson-bright)' }} />
+        <div style={{ textAlign: 'center', lineHeight: 0.9 }}>
+          <div className="sub-label" style={{ fontSize: 11, letterSpacing: '0.3em', color: 'var(--crimson-bright)', marginBottom: 8 }}>★ EST · 2026 ★</div>
+          <div className="chika-anton" style={{ fontSize: 70, color: 'var(--cream)' }}>CHIKA</div>
+          <div className="baloo" style={{ fontSize: 24, fontWeight: 700, color: 'var(--crimson-bright)', marginTop: 2 }}>चित्र कथा</div>
+          <div className="sub-label" style={{ fontSize: 10.5, letterSpacing: '0.26em', color: 'var(--cream)', marginTop: 8 }}>COMIC READER</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// 06 · Cinematic Reticle
+function CinematicReticle() {
+  return (
+    <div className="logo-fill" style={{ background: 'var(--ink)' }}>
+      <div className="halftone" style={{ color: 'var(--crimson)', opacity: 0.08 }} />
+      <div className="reticle"><span className="tl" /><span className="tr" /><span className="bl" /><span className="br" /></div>
+      <div style={{ textAlign: 'center' }}>
+        <div className="chika-anton" style={{ fontSize: 98, color: 'var(--cream)', lineHeight: 0.9, letterSpacing: '0.02em' }}>CHIKA</div>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12, marginTop: 14 }}>
+          <span style={{ height: 2, flex: '0 0 30px', background: 'var(--crimson)' }} />
+          <span className="sub-label" style={{ fontSize: 13, letterSpacing: '0.34em', color: 'var(--cream)' }}>TAP · ZOOM · READ</span>
+          <span style={{ height: 2, flex: '0 0 30px', background: 'var(--crimson)' }} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---- App icons ----
+function IconReticle() {
+  return (
+    <div className="icon-tile" style={{ background: 'var(--crimson)' }}>
+      <div className="halftone" style={{ color: 'var(--ink)', opacity: 0.2 }} />
+      <div className="reticle" style={{ opacity: 0.95 }}>
+        <span className="tl" style={{ borderColor: 'var(--cream)', width: 26, height: 26, top: 22, left: 22 }} />
+        <span className="tr" style={{ borderColor: 'var(--cream)', width: 26, height: 26, top: 22, right: 22 }} />
+        <span className="bl" style={{ borderColor: 'var(--cream)', width: 26, height: 26, bottom: 22, left: 22 }} />
+        <span className="br" style={{ borderColor: 'var(--cream)', width: 26, height: 26, bottom: 22, right: 22 }} />
+      </div>
+      <span className="chika-anton" style={{ fontSize: 118, color: 'var(--cream)', lineHeight: 1 }}>C</span>
+    </div>
+  );
+}
+function IconBubble() {
+  return (
+    <div className="icon-tile" style={{ background: 'var(--ink)' }}>
+      <div className="halftone" style={{ color: '#fff', opacity: 0.07 }} />
+      <div style={{ width: 116, height: 100, borderRadius: 28, background: 'var(--crimson)', border: '4px solid var(--cream)', position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <span className="chika-bungee" style={{ fontSize: 64, color: 'var(--cream)', lineHeight: 1 }}>C</span>
+        <span style={{ position: 'absolute', left: 24, bottom: -20, width: 0, height: 0, borderRight: '26px solid transparent', borderTop: '24px solid var(--crimson)' }} />
+      </div>
+    </div>
+  );
+}
+function IconPanels() {
+  return (
+    <div className="icon-tile" style={{ background: 'var(--maroon)' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gridTemplateRows: '1fr 1fr', gap: 9, width: 118, height: 118 }}>
+        <div style={{ background: 'var(--cream)', borderRadius: 8 }} />
+        <div style={{ background: 'var(--cream)', borderRadius: 8 }} />
+        <div style={{ background: 'var(--crimson-bright)', borderRadius: 8, position: 'relative', boxShadow: '0 0 0 3px var(--cream)', overflow: 'hidden' }}>
+          <div className="halftone" style={{ color: 'var(--ink)', opacity: 0.3 }} />
+        </div>
+        <div style={{ background: 'var(--cream)', borderRadius: 8 }} />
+      </div>
+    </div>
+  );
+}
+function IconClassic() {
+  return (
+    <div className="icon-tile" style={{ background: 'var(--paper)' }}>
+      <div className="halftone halftone-fade" style={{ color: 'var(--maroon)', opacity: 0.2 }} />
+      <div style={{ display: 'flex', alignItems: 'center', position: 'relative' }}>
+        <span className="chika-anton" style={{ fontSize: 122, color: 'var(--ink)', lineHeight: 1 }}>C</span>
+        <span style={{ width: 16, height: 16, borderRadius: '50%', background: 'var(--crimson)', marginLeft: 4, marginTop: 28, alignSelf: 'flex-start' }} />
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
+//  REFINED DIRECTION (from picks 03, 04, B, C)
+// ============================================================
+
+// R1 · Halftone Pop — refined
+function HalftonePopR() {
+  return (
+    <div className="logo-fill" style={{ background: 'var(--crimson)' }}>
+      <div className="halftone halftone-fade" style={{ color: 'var(--ink)', opacity: 0.26 }} />
+      <div style={{ position: 'relative', textAlign: 'center' }}>
+        <div className="chika-anton" style={{ fontSize: 110, lineHeight: 0.82, color: 'var(--cream)', letterSpacing: '0.015em', textShadow: '5px 6px 0 var(--maroon-deep)' }}>CHIKA</div>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12, marginTop: 16 }}>
+          <span style={{ height: 2.5, width: 26, background: 'var(--ink)' }} />
+          <span className="baloo" style={{ fontSize: 30, fontWeight: 700, color: 'var(--ink)', lineHeight: 1 }}>चित्र कथा</span>
+          <span style={{ height: 2.5, width: 26, background: 'var(--ink)' }} />
+        </div>
+        <div className="sub-label" style={{ fontSize: 11.5, letterSpacing: '0.42em', color: 'var(--cream)', marginTop: 12 }}>COMIC&nbsp;READER</div>
+      </div>
+    </div>
+  );
+}
+
+// R2 · Panel Frame — refined (halftone-pop letters inside the panel)
+function PanelFrameR() {
+  return (
+    <div className="logo-fill" style={{ background: 'var(--ink)' }}>
+      <div className="panel-frame" style={{ padding: 0, display: 'flex' }}>
+        <div style={{ padding: '30px 34px 30px', background: 'var(--paper)', borderRight: '5px solid var(--ink)', position: 'relative', overflow: 'hidden' }}>
+          <div className="halftone halftone-fade" style={{ color: 'var(--crimson)', opacity: 0.2 }} />
+          <div className="chika-anton" style={{ fontSize: 80, color: 'var(--ink)', lineHeight: 0.82, position: 'relative', textShadow: '4px 5px 0 var(--crimson)' }}>CHIKA</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 12, position: 'relative' }}>
+            <span className="sub-label" style={{ fontSize: 12, letterSpacing: '0.24em', color: 'var(--maroon)' }}>CHITRA KATHA</span>
+            <span className="baloo" style={{ fontSize: 17, fontWeight: 700, color: 'var(--crimson)' }}>· चित्र कथा</span>
+          </div>
+        </div>
+        <div style={{ width: 50, background: 'var(--crimson)', position: 'relative', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div className="halftone" style={{ color: 'var(--ink)', opacity: 0.28 }} />
+          <div style={{ position: 'relative', width: 22, height: 22 }}>
+            <span style={{ position: 'absolute', top: 0, left: 0, width: 9, height: 9, borderTop: '2.5px solid var(--cream)', borderLeft: '2.5px solid var(--cream)' }} />
+            <span style={{ position: 'absolute', top: 0, right: 0, width: 9, height: 9, borderTop: '2.5px solid var(--cream)', borderRight: '2.5px solid var(--cream)' }} />
+            <span style={{ position: 'absolute', bottom: 0, left: 0, width: 9, height: 9, borderBottom: '2.5px solid var(--cream)', borderLeft: '2.5px solid var(--cream)' }} />
+            <span style={{ position: 'absolute', bottom: 0, right: 0, width: 9, height: 9, borderBottom: '2.5px solid var(--cream)', borderRight: '2.5px solid var(--cream)' }} />
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// R3 · Horizontal app-header lockup (icon C + wordmark)
+function HeaderLockup() {
+  return (
+    <div className="logo-fill" style={{ background: 'var(--paper)', flexDirection: 'row', gap: 22 }}>
+      <div className="halftone halftone-fade" style={{ color: 'var(--maroon)', opacity: 0.14 }} />
+      <div style={{ width: 88, height: 88, borderRadius: 22, background: 'var(--maroon)', display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative', flex: '0 0 auto' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gridTemplateRows: '1fr 1fr', gap: 6, width: 54, height: 54 }}>
+          <div style={{ background: 'var(--cream)', borderRadius: 4 }} />
+          <div style={{ background: 'var(--cream)', borderRadius: 4 }} />
+          <div style={{ background: 'var(--crimson-bright)', borderRadius: 4, boxShadow: '0 0 0 2px var(--cream)' }} />
+          <div style={{ background: 'var(--cream)', borderRadius: 4 }} />
+        </div>
+      </div>
+      <div style={{ position: 'relative' }}>
+        <div className="chika-anton" style={{ fontSize: 64, color: 'var(--ink)', lineHeight: 0.82 }}>CHIK<span style={{ color: 'var(--crimson)' }}>A</span></div>
+        <div className="sub-label" style={{ fontSize: 11, letterSpacing: '0.3em', color: 'var(--maroon)', marginTop: 6 }}>CHITRA KATHA</div>
+      </div>
+    </div>
+  );
+}
+
+// IB · Bubble C — refined
+function IconBubbleR() {
+  return (
+    <div className="icon-tile" style={{ background: 'var(--ink)' }}>
+      <div className="halftone" style={{ color: 'var(--crimson)', opacity: 0.12 }} />
+      <div style={{ width: 122, height: 104, borderRadius: 30, background: 'var(--crimson)', border: '5px solid var(--cream)', position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '4px 5px 0 rgba(0,0,0,0.35)' }}>
+        <div className="halftone" style={{ color: 'var(--ink)', opacity: 0.16, borderRadius: 26 }} />
+        <span className="chika-bungee" style={{ fontSize: 66, color: 'var(--cream)', lineHeight: 1, position: 'relative' }}>C</span>
+        <span style={{ position: 'absolute', left: 26, bottom: -22, width: 0, height: 0, borderRight: '28px solid transparent', borderTop: '26px solid var(--crimson)' }} />
+        <span style={{ position: 'absolute', left: 24, bottom: -27, width: 0, height: 0, borderRight: '32px solid transparent', borderTop: '30px solid var(--cream)', zIndex: -1 }} />
+      </div>
+    </div>
+  );
+}
+
+// IC · Panel Grid — refined (detected cell gets focus reticle)
+function IconPanelsR() {
+  return (
+    <div className="icon-tile" style={{ background: 'var(--maroon)' }}>
+      <div className="halftone" style={{ color: 'var(--ink)', opacity: 0.12 }} />
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gridTemplateRows: '1fr 1fr', gap: 10, width: 120, height: 120, position: 'relative' }}>
+        <div style={{ background: 'var(--cream)', borderRadius: 9 }} />
+        <div style={{ background: 'var(--cream)', borderRadius: 9 }} />
+        <div style={{ background: 'var(--crimson-bright)', borderRadius: 9, position: 'relative', boxShadow: '0 0 0 3px var(--cream)', overflow: 'hidden' }}>
+          <div className="halftone" style={{ color: 'var(--ink)', opacity: 0.28 }} />
+          <span style={{ position: 'absolute', top: 6, left: 6, width: 11, height: 11, borderTop: '2.5px solid var(--cream)', borderLeft: '2.5px solid var(--cream)' }} />
+          <span style={{ position: 'absolute', top: 6, right: 6, width: 11, height: 11, borderTop: '2.5px solid var(--cream)', borderRight: '2.5px solid var(--cream)' }} />
+          <span style={{ position: 'absolute', bottom: 6, left: 6, width: 11, height: 11, borderBottom: '2.5px solid var(--cream)', borderLeft: '2.5px solid var(--cream)' }} />
+          <span style={{ position: 'absolute', bottom: 6, right: 6, width: 11, height: 11, borderBottom: '2.5px solid var(--cream)', borderRight: '2.5px solid var(--cream)' }} />
+        </div>
+        <div style={{ background: 'var(--cream)', borderRadius: 9 }} />
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
+//  FINAL LOCKUP (04 CHI/KA split + Panel-refined elements + C-panel icon)
+// ============================================================
+
+// A jagged comic "explosion burst" clip-path (alternating long/short spikes,
+// lightly jittered so it feels hand-inked rather than a clean star).
+function burstClip(spikes) {
+  const jit = [1, 0.9, 1.05, 0.86, 1.02, 0.95, 1.07, 0.88, 1.0, 0.92, 1.04, 0.85,
+               1.01, 0.94, 1.06, 0.9, 0.98, 0.91, 1.03, 0.87, 1.0, 0.93, 1.05, 0.89,
+               1.02, 0.95, 1.07, 0.88];
+  const total = spikes * 2;
+  const pts = [];
+  for (let i = 0; i < total; i++) {
+    const outer = i % 2 === 0;
+    const base = outer ? 50 : 30;
+    const rad = base * (jit[i % jit.length] || 1);
+    const ang = (Math.PI * 2 * i) / total - Math.PI / 2;
+    pts.push(`${(50 + Math.cos(ang) * rad).toFixed(1)}% ${(50 + Math.sin(ang) * rad).toFixed(1)}%`);
+  }
+  return `polygon(${pts.join(', ')})`;
+}
+
+// Comic SFX badge: a Devanagari sound-word inside a double-outlined explosion
+// burst, tilted, the way comic onomatopoeia is drawn to show impact.
+function ComicSFX({
+  word, size = 150, rotate = -12,
+  burst = 'var(--maroon-deep)', edge = 'var(--cream)',
+  fill = 'var(--cream)', stroke = 'var(--ink)', dotColor = 'var(--ink)',
+  burstOpacity = 0.22, edgeOpacity = 0.12, textOpacity = 0.42, dotOpacity = 0.26,
+  style = {},
+}) {
+  const clip = React.useMemo(() => burstClip(13), []);
+  const d = size * 0.07;
+  const fade = 'radial-gradient(72% 72% at 52% 46%, #000 26%, transparent 90%)';
+  return (
+    <div aria-hidden="true" style={{
+      position: 'absolute', width: size, height: size,
+      transform: `rotate(${rotate}deg)`, pointerEvents: 'none',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      WebkitMaskImage: fade, maskImage: fade, ...style,
+    }}>
+      {/* faint outline + tonal fill = nuanced bubble; text carries the legibility */}
+      <div style={{ position: 'absolute', inset: 0, background: edge, clipPath: clip, opacity: edgeOpacity }} />
+      <div style={{ position: 'absolute', inset: '10%', background: burst, clipPath: clip, opacity: burstOpacity }} />
+      <span className="sfx-word" style={{
+        position: 'relative', fontSize: size * 0.4, color: fill,
+        WebkitTextStroke: `${Math.max(2, size * 0.018)}px ${stroke}`,
+        opacity: textOpacity, transform: 'rotate(2deg)',
+      }}>{word}</span>
+      {/* printed halftone dots laid over the whole burst (and the word) */}
+      <div style={{
+        position: 'absolute', inset: 0, clipPath: clip, color: dotColor, opacity: dotOpacity,
+        backgroundImage: `radial-gradient(currentColor ${d * 0.24}px, transparent ${d * 0.28}px)`,
+        backgroundSize: `${d}px ${d}px`,
+      }} />
+    </div>
+  );
+}
+
+// Three-panel "C" mark: top bar + a wider DETECTED spine (crimson, 4 corner
+// markers) + bottom bar. The open right side completes the C.
+function PanelCMark({ size = 120, gap = 9, radius = 7,
+  cell = 'var(--cream)', cellBorder = 'var(--ink)',
+  spine = 'var(--crimson-bright)', spineBorder = 'var(--ink)',
+  mark = 'var(--cream)', dotColor = 'var(--ink)' }) {
+  const bw = Math.max(2, size * 0.03);
+  const reticleCorner = (pos) => {
+    const b = `${Math.max(2, size * 0.022)}px solid ${mark}`;
+    const m = size * 0.06;
+    const base = { position: 'absolute', width: size * 0.11, height: size * 0.11, zIndex: 2 };
+    const map = {
+      tl: { top: m, left: m, borderTop: b, borderLeft: b },
+      tr: { top: m, right: m, borderTop: b, borderRight: b },
+      bl: { bottom: m, left: m, borderBottom: b, borderLeft: b },
+      br: { bottom: m, right: m, borderBottom: b, borderRight: b },
+    };
+    return <span style={{ ...base, ...map[pos] }} />;
+  };
+  // every panel gets a comic border; gutters (gap) show the ground
+  const cellStyle = { background: cell, borderRadius: radius, border: `${bw}px solid ${cellBorder}`, boxSizing: 'border-box' };
+  const grid = {
+    display: 'grid',
+    gridTemplateColumns: '1.95fr 1fr 1fr',   // wider left column = bigger detected spine
+    gridTemplateRows: '1.42fr 1fr 1fr 1.42fr', // thick top & bottom bars; taller middle
+    gap, width: size, height: size * 1.03, position: 'relative',
+  };
+  return (
+    <div style={grid}>
+      {/* top bar */}
+      <div style={{ ...cellStyle, gridColumn: '1 / 4', gridRow: '1 / 2' }} />
+      {/* DETECTED spine — wider, accent fill, border + halftone + corner markers */}
+      <div style={{ gridColumn: '1 / 2', gridRow: '2 / 4', background: spine, borderRadius: radius, border: `${bw}px solid ${spineBorder}`, boxSizing: 'border-box', position: 'relative', overflow: 'hidden' }}>
+        <div className="halftone" style={{ color: dotColor, opacity: 0.22 }} />
+        {reticleCorner('tl')}{reticleCorner('tr')}{reticleCorner('bl')}{reticleCorner('br')}
+      </div>
+      {/* bottom bar */}
+      <div style={{ ...cellStyle, gridColumn: '1 / 4', gridRow: '4 / 5' }} />
+    </div>
+  );
+}
+
+// Self-contained app icon: rounded tile + subtle distributed comic-burst
+// backdrop + Ben-Day dots + the inked panel "C". One source of truth so the
+// app-header lockup and the icon tiles always match.
+function ChikaIcon({ box = 200, ground = 'maroon' }) {
+  const G = {
+    maroon:  { bg: 'var(--maroon)', dot: 'var(--ink)',     dotOp: 0.38, cell: 'var(--cream)', cellBorder: 'var(--ink)',    spine: 'var(--crimson-bright)', spineBorder: 'var(--ink)',  mark: 'var(--cream)' },
+    // CHI-dark: near-black ground, crimson panel borders (different), cream spine outline
+    dark:    { bg: 'var(--ink)',    dot: 'var(--crimson)', dotOp: 0.34, cell: 'var(--cream)', cellBorder: 'var(--crimson)', spine: 'var(--crimson-bright)', spineBorder: 'var(--cream)', mark: 'var(--cream)' },
+    // CHI-cream: paper ground, dark ink panels so the C reads, crimson spine
+    cream:   { bg: 'var(--paper)',  dot: 'var(--maroon)',  dotOp: 0.24, cell: 'var(--ink)',   cellBorder: 'var(--ink)',     spine: 'var(--crimson)',        spineBorder: 'var(--ink)',   mark: 'var(--cream)' },
+  }[ground];
+  const c = box * 0.84;
+  const dot = box * 0.072;
+  const dotFade = 'linear-gradient(138deg, #000 4%, rgba(0,0,0,0.5) 46%, rgba(0,0,0,0.04) 86%)';
+  return (
+    <div style={{ position: 'relative', width: box, height: box, borderRadius: box * 0.22, overflow: 'hidden', background: G.bg, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <div style={{
+        position: 'absolute', inset: 0, color: G.dot, opacity: G.dotOp,
+        backgroundImage: `radial-gradient(currentColor ${dot * 0.22}px, transparent ${dot * 0.25}px)`,
+        backgroundSize: `${dot}px ${dot}px`,
+        WebkitMaskImage: dotFade, maskImage: dotFade,
+      }} />
+      <div style={{ position: 'relative', zIndex: 1 }}>
+        <PanelCMark size={c} gap={c * 0.075} radius={c * 0.06}
+          cell={G.cell} cellBorder={G.cellBorder} spine={G.spine} spineBorder={G.spineBorder}
+          mark={G.mark} dotColor={G.dot} />
+      </div>
+    </div>
+  );
+}
+
+// F1 · Final wordmark — two comic panels: CHI (ink/paper) | KA (cream/crimson)
+function FinalWordmark() {
+  return (
+    <div className="logo-fill" style={{ background: 'var(--ink)' }}>
+      <div className="panel-frame" style={{ padding: 0, display: 'flex', flexDirection: 'column' }}>
+        <div style={{ display: 'flex' }}>
+          <div style={{ padding: '20px 26px 18px 24px', background: 'var(--paper)', position: 'relative', overflow: 'hidden' }}>
+            <div className="halftone halftone-fade" style={{ color: 'var(--crimson)', opacity: 0.2 }} />
+            <span className="chika-anton" style={{ fontSize: 78, color: 'var(--ink)', lineHeight: 0.8, letterSpacing: '0.04em', position: 'relative', textShadow: '3px 4px 0 var(--crimson)' }}>CHI</span>
+          </div>
+          <div style={{ width: 5, background: 'var(--ink)' }} />
+          <div style={{ padding: '20px 24px 18px 22px', background: 'var(--crimson)', position: 'relative', overflow: 'hidden', display: 'flex', alignItems: 'center' }}>
+            <div className="halftone" style={{ color: 'var(--ink)', opacity: 0.24 }} />
+            <span style={{ position: 'absolute', top: 9, left: 9, width: 11, height: 11, borderTop: '2.5px solid var(--cream)', borderLeft: '2.5px solid var(--cream)' }} />
+            <span style={{ position: 'absolute', top: 9, right: 9, width: 11, height: 11, borderTop: '2.5px solid var(--cream)', borderRight: '2.5px solid var(--cream)' }} />
+            <span style={{ position: 'absolute', bottom: 9, left: 9, width: 11, height: 11, borderBottom: '2.5px solid var(--cream)', borderLeft: '2.5px solid var(--cream)' }} />
+            <span style={{ position: 'absolute', bottom: 9, right: 9, width: 11, height: 11, borderBottom: '2.5px solid var(--cream)', borderRight: '2.5px solid var(--cream)' }} />
+            <span className="chika-anton" style={{ fontSize: 78, color: 'var(--cream)', lineHeight: 0.8, letterSpacing: '0.03em', position: 'relative', textShadow: '3px 4px 0 var(--maroon-deep)' }}>KA</span>
+          </div>
+        </div>
+        <div style={{ borderTop: '5px solid var(--ink)', background: 'var(--paper)', padding: '9px 22px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, position: 'relative' }}>
+          <span className="sub-label" style={{ fontSize: 11.5, letterSpacing: '0.26em', color: 'var(--maroon)' }}>CHITRA KATHA</span>
+          <span className="baloo" style={{ fontSize: 18, fontWeight: 700, color: 'var(--crimson)' }}>चित्र कथा</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// F2/F3/F5 · Icon grounds — all share ChikaIcon
+function IconPanelC()     { return <ChikaIcon box={200} ground="maroon" />; }
+function IconPanelCDark() { return <ChikaIcon box={200} ground="dark" />; }
+function IconPanelCCream(){ return <ChikaIcon box={200} ground="cream" />; }
+
+// Alt logo — "CHI" set in the wordmark's KA-panel style:
+// Anton lettering on a colored panel, reticle corner markers + Ben-Day dots.
+function IconCHI({ box = 200, scheme = 'crimson' }) {
+  const S = {
+    crimson: { bg: 'var(--crimson)',     text: 'var(--cream)', shadow: 'var(--maroon-deep)', dot: 'var(--ink)',    dotOp: 0.3,  mark: 'var(--cream)' },
+    maroon:  { bg: 'var(--maroon)',      text: 'var(--cream)', shadow: 'var(--ink)',         dot: 'var(--ink)',    dotOp: 0.32, mark: 'var(--cream)' },
+    ink:     { bg: 'var(--ink)',         text: 'var(--cream)', shadow: 'var(--crimson)',     dot: 'var(--crimson)',dotOp: 0.32, mark: 'var(--crimson)' },
+    cream:   { bg: 'var(--paper)',       text: 'var(--ink)',   shadow: 'var(--crimson)',     dot: 'var(--maroon)', dotOp: 0.26, mark: 'var(--crimson)' },
+    gold:    { bg: 'var(--ochre)',       text: 'var(--ink)',   shadow: 'var(--crimson)',     dot: 'var(--maroon)', dotOp: 0.24, mark: 'var(--maroon)' },
+  }[scheme];
+  const dot = box * 0.072;
+  const dotFade = 'linear-gradient(138deg, #000 4%, rgba(0,0,0,0.45) 48%, rgba(0,0,0,0.05) 88%)';
+  const bL = box * 0.13;
+  const b = `${Math.max(2.5, box * 0.02)}px solid ${S.mark}`;
+  const m = box * 0.1;
+  const corner = (s) => <span style={{ position: 'absolute', width: bL, height: bL, zIndex: 2, ...s }} />;
+  return (
+    <div style={{ position: 'relative', width: box, height: box, borderRadius: box * 0.22, overflow: 'hidden', background: S.bg, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <div style={{
+        position: 'absolute', inset: 0, color: S.dot, opacity: S.dotOp,
+        backgroundImage: `radial-gradient(currentColor ${dot * 0.22}px, transparent ${dot * 0.25}px)`,
+        backgroundSize: `${dot}px ${dot}px`, WebkitMaskImage: dotFade, maskImage: dotFade,
+      }} />
+      {corner({ top: m, left: m, borderTop: b, borderLeft: b })}
+      {corner({ top: m, right: m, borderTop: b, borderRight: b })}
+      {corner({ bottom: m, left: m, borderBottom: b, borderLeft: b })}
+      {corner({ bottom: m, right: m, borderBottom: b, borderRight: b })}
+      <span className="chika-anton" style={{
+        position: 'relative', fontSize: box * 0.38, color: S.text, lineHeight: 0.8,
+        letterSpacing: '0', textShadow: `${box * 0.016}px ${box * 0.02}px 0 ${S.shadow}`,
+      }}>CHI</span>
+    </div>
+  );
+}
+
+// F4 · Horizontal app-header lockup (C icon + duotone wordmark)
+
+// CHI + KA side by side on ONE background; CHI and KA swap text/shadow colors.
+function IconCHIKA({ box = 200, base = 'ink' }) {
+  const bg   = base === 'ink' ? 'var(--ink)' : 'var(--paper)';
+  const dot  = base === 'ink' ? 'var(--crimson)' : 'var(--maroon)';
+  const dotOp = base === 'ink' ? 0.3 : 0.22;
+  const a = base === 'ink' ? 'var(--cream)' : 'var(--ink)';  // base foreground
+  const b = 'var(--crimson)';                                 // accent
+  const dotSz = box * 0.07;
+  const bL = box * 0.09, m = box * 0.06;
+  const reticle = (() => {
+    const bd = `${Math.max(2, box * 0.014)}px solid var(--crimson)`;
+    return (
+      <React.Fragment>
+        <span style={{ position: 'absolute', top: m, left: m, width: bL, height: bL, borderTop: bd, borderLeft: bd }} />
+        <span style={{ position: 'absolute', top: m, right: m, width: bL, height: bL, borderTop: bd, borderRight: bd }} />
+        <span style={{ position: 'absolute', bottom: m, left: m, width: bL, height: bL, borderBottom: bd, borderLeft: bd }} />
+        <span style={{ position: 'absolute', bottom: m, right: m, width: bL, height: bL, borderBottom: bd, borderRight: bd }} />
+      </React.Fragment>
+    );
+  })();
+  const shadow = `${box * 0.014}px ${box * 0.018}px 0`;
+  return (
+    <div style={{ position: 'relative', width: box, height: box, borderRadius: box * 0.22, overflow: 'hidden', background: bg, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <div style={{ position: 'absolute', inset: 0, color: dot, opacity: dotOp,
+        backgroundImage: `radial-gradient(currentColor ${dotSz * 0.22}px, transparent ${dotSz * 0.25}px)`,
+        backgroundSize: `${dotSz}px ${dotSz}px` }} />
+      {reticle}
+      {/* one continuous word; only the color/shadow flips at the CHI|KA seam */}
+      <span className="chika-anton" style={{ position: 'relative', fontSize: box * 0.265, lineHeight: 0.8, letterSpacing: '0.01em', whiteSpace: 'nowrap' }}>
+        <span style={{ color: a, textShadow: `${shadow} ${b}` }}>CHI</span>
+        <span style={{ color: b, textShadow: `${shadow} ${a}` }}>KA</span>
+      </span>
+    </div>
+  );
+}
+function FinalHeaderLockup() {
+  return (
+    <div className="logo-fill" style={{ background: 'var(--paper)', flexDirection: 'row', gap: 24 }}>
+      <div className="halftone halftone-fade" style={{ color: 'var(--maroon)', opacity: 0.14 }} />
+      <div style={{ flex: '0 0 auto' }}><ChikaIcon box={90} ground="maroon" /></div>
+      <div style={{ position: 'relative' }}>
+        <div className="chika-anton" style={{ fontSize: 62, lineHeight: 0.82 }}>
+          <span style={{ color: 'var(--ink)' }}>CHI</span><span style={{ color: 'var(--crimson)' }}>KA</span>
+        </div>
+        <div className="sub-label" style={{ fontSize: 11, letterSpacing: '0.3em', color: 'var(--maroon)', marginTop: 7 }}>CHITRA KATHA</div>
+      </div>
+    </div>
+  );
+}
+
+function ChikaCanvas() {
+  const { DesignCanvas, DCSection, DCArtboard } = window;
+  return (
+    <DesignCanvas>
+      <DCSection id="final" title="Final lockup" subtitle="Primary wordmark + the C · dark app icon.">
+        <DCArtboard id="f1" label="Primary wordmark" width={480} height={300}><FinalWordmark /></DCArtboard>
+        <DCArtboard id="f2d" label="C · dark" width={200} height={200}><IconPanelCDark /></DCArtboard>
+      </DCSection>
+    </DesignCanvas>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<ChikaCanvas />);
+</script>
+</body>
+</html>

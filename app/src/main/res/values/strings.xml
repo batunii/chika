@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">Comic Reader</string>
+    <string name="app_name">Chika</string>
     <string name="library_title">My Comics</string>
     <string name="add_comic">Add comic</string>
     <string name="empty_library">No comics yet.\nTap + to add a CBZ or CBR file.</string>

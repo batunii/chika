@@ -1,0 +1,1 @@
+Read CBZ/CBR comics panel by panel, with on-device panel detection.

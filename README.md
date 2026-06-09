@@ -1,91 +1,108 @@
-# Comic Book Reader
+<p align="center">
+  <img src="design_handoff_chika_reader/assets/logo-lockup.png" width="420" alt="Chika · Chitra Katha">
+</p>
 
-An Android comic reader that opens **CBZ** and **CBR** files, detects the panels on each page with
-OpenCV, and guides you through them one tap at a time — page → panel → panel → … → zoom out → next
-page. Built with Kotlin and Jetpack Compose.
+<p align="center">
+  <strong>Chika</strong> — a panel-by-panel comic reader for Android.<br>
+  Open a CBZ/CBR, and Chika finds the panels with an on-device ML model and guides you through them
+  one tap at a time.
+</p>
 
-## Reading experience
+<p align="center">
+  <a href="https://github.com/batunii/chika/actions/workflows/ci.yml"><img src="https://github.com/batunii/chika/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MPL_2.0-brightgreen.svg" alt="License: MPL 2.0"></a>
+  <img src="https://img.shields.io/badge/platform-Android%208.0%2B-3DDC84.svg" alt="Android 8.0+">
+</p>
 
-When you open a page it's shown in full (zoomed out). Tapping the **right** third of the screen
-advances: first to panel 1, then panel 2, and so on in reading order. After the last panel a tap
-zooms back out to the whole page; the next tap turns to the next page (which again starts zoomed
-out, so page turns always happen from a full-page view — smooth and consistent).
+<p align="center">
+  <img src="design_handoff_chika_reader/assets/screens/library.png" width="280" alt="Library">
+  &nbsp;&nbsp;
+  <img src="design_handoff_chika_reader/assets/screens/reader.png" width="280" alt="Reader">
+</p>
 
-| Gesture | Action |
-|---|---|
-| Tap **right** third | Next (panel, then next page) |
-| Tap **left** third | Previous |
-| Tap **center** | Show/hide the top bar |
-| Pinch / drag | Free zoom & pan the current view |
-| Top bar ⇄ button | Toggle left-to-right / right-to-left (manga) ordering |
+---
 
-Panel detection is automatic and runs lazily (current page on demand, next page prefetched). If a
-page doesn't match the usual bordered-panel layout (splash pages, borderless/full-bleed art, very
-noisy scans), the reader gracefully falls back to showing the whole page as a single "panel", so
-reading never breaks.
+## What it does
 
-## Requirements
+Tapping the right side of a page steps you **into each panel** in reading order — page → panel 1 →
+panel 2 → … → zoom back out → next page — so a comic reads comfortably on a phone instead of
+pinch-zooming around a full page. Panels are detected automatically; you can pan a zoomed panel,
+swipe to turn whole pages, scrub pages, and flip reading direction (LTR/RTL).
 
-- **Android Studio** (bundles the JDK + SDK). Developed against JDK 21 and SDK **API 36**.
-- A **run target**: a physical device with USB debugging, or an emulator (AVD).
-- `minSdk 26` (Android 8.0) · `compileSdk / targetSdk 36`.
+## Features
+
+- **CBZ and CBR** support, including **RAR5** (via 7-Zip-JBinding).
+- **On-device ML panel detection** — a small YOLO TFLite model (Manga109-trained) finds panels and
+  speech balloons; no network, fully offline.
+- **Merge / divide planner** — groups tiny adjacent panels into one comfortable zoom and splits
+  oversized panels with a bubble-aware cut.
+- **Reader controls** — tap zones to step panels, swipe to turn pages, pinch + drag to pan
+  (clamped to the artwork), a page scrubber, a "show whole page" button, and an LTR/RTL toggle.
+- **Library** — import via the system file picker (copied into app storage), cover thumbnails,
+  per-comic resume (page **and** panel), long-press to remove.
+- **Chika brand UI** — pulp-comic identity (Anton + Archivo type, ink/crimson/cream/ochre palette).
 
 ## Build & run
 
-1. **Open** the project folder in Android Studio (`File → Open`) and let it sync Gradle. First sync
-   downloads dependencies (incl. the OpenCV AAR, ~tens of MB) and may take a few minutes.
-2. Pick a run target:
-   - **Phone:** Settings → About phone → tap *Build number* 7× to enable Developer Options →
-     enable **USB debugging** → plug in via USB and accept the prompt.
-   - **Emulator:** *Device Manager* → *Add a device* → e.g. *Pixel 7, API 36* (it downloads the
-     system image).
-3. Press **Run ▶**.
-
-Command line (from the project root):
+Requires **Android Studio** (bundles JDK + SDK). Developed against JDK 21 and Android **API 36**;
+`minSdk 26` (Android 8.0).
 
 ```bash
-./gradlew assembleDebug          # build the APK
-./gradlew installDebug           # build + install on the connected device/emulator
+# build a debug APK
+./gradlew :app:assembleDebug
+# build and install on a connected device/emulator
+./gradlew :app:installDebug
 ```
 
-`local.properties` already points `sdk.dir` at `C:\Users\syson\AppData\Local\Android\Sdk`. If you
-move the SDK, update that path (the file is machine-specific and git-ignored).
+On Windows without `java` on PATH, point Gradle at Android Studio's bundled JDK first:
 
-## Using the app
+```powershell
+$env:JAVA_HOME = "C:\Program Files\Android\Android Studio\jbr"
+.\gradlew.bat :app:installDebug
+```
 
-1. Tap the **+** button and pick a `.cbz` or `.cbr` file. The app copies it into its own storage,
-   validates it, generates a cover, and adds it to your library. The original file is left untouched.
-2. Tap a cover to read. Your position (page **and** panel) is saved automatically and resumes next
-   time. Long-press a cover to remove it from the library.
+CI builds the debug APK on every push/PR — see [`.github/workflows/ci.yml`](.github/workflows/ci.yml).
+
+## How panel detection works
+
+1. The page is letterboxed to 640×640 and run through the bundled TFLite model, which returns panel
+   and text-balloon boxes.
+2. Overlapping/duplicate boxes are suppressed; panels are ordered (rows top→down, LTR/RTL within a
+   row).
+3. The **planner** merges runs of small adjacent panels (capped for readability) and divides
+   oversized panels with a single cut placed between bubble groups.
+4. A classical OpenCV detector and a whole-page fallback cover the cases where the model finds
+   nothing.
 
 ## Architecture
 
 ```
-data/archive   ComicArchive abstraction; ZipComicArchive (CBZ via commons-compress),
-               RarComicArchive (CBR via junrar); magic-byte format detection; natural sort.
-data/page      PageLoader — decodes pages with downsampling + an LRU bitmap cache.
-data/db        Room: ComicEntity / ComicDao / AppDatabase.
-data/library   LibraryRepository — import (copy + cover), list, progress, delete.
-detection      PanelDetector (OpenCV: threshold → morphology → contours → filter) and
-               PanelOrdering (row clustering, LTR/RTL). Falls back to a single full-page panel.
-ui/reader      ReaderViewModel (the page→panel→outro slot state machine) + ReaderScreen
-               (animated camera framing, tap zones, pinch/pan, page-turn fade).
-ui/library     LibraryViewModel + LibraryScreen (cover grid, SAF import, delete).
-ui/nav         AppNavHost — Library ⇄ Reader.
+data/archive   ComicArchive: ZipComicArchive (CBZ), RarComicArchive (CBR/RAR5 via 7-Zip-JBinding)
+data/page      PageLoader — downsampling decode + LRU bitmap cache
+data/db        Room (ComicEntity / dao / db)
+data/library   LibraryRepository — import (copy + cover), list, progress, delete
+detection      MlPanelDetector (TFLite) · PanelDetector (OpenCV fallback) · PanelPlanner · ordering
+ui/reader      ReaderViewModel (page→panel state machine) + ReaderScreen (camera, gestures, chrome)
+ui/library     LibraryViewModel + LibraryScreen
+ui/brand       Chika component kit (mark, reticle, halftone, starburst, page coin, wordmark)
+ui/theme       palette + Anton/Archivo typography
 ```
 
-## Known limitations / notes
+**Stack:** Kotlin · Jetpack Compose (Material 3) · Coroutines · Room · OpenCV · TensorFlow Lite ·
+Apache Commons Compress · 7-Zip-JBinding.
 
-- **RAR5:** junrar fully supports RAR4. RAR5 archives are only partially supported and may fail to
-  open; such files surface a friendly error.
-- **Panel detection is heuristic.** The tuning knobs live in `PanelDetector.Config` (min/max panel
-  area, edge size, morphology kernel, overlap thresholds). Expect to tune these against real comics.
-- Supported page image types inside archives: JPEG, PNG, WebP, GIF, BMP, AVIF.
-- First launch initializes OpenCV's native libraries; if that ever fails, the app still runs and
-  simply shows whole pages without panel zooming.
+## License
 
-## Roadmap ideas
+Chika's source is licensed under the **Mozilla Public License 2.0** — see [`LICENSE`](LICENSE).
 
-- Manual panel correction/reordering for mis-detected pages.
-- PDF support (Android `PdfRenderer`) and image-folder "comics".
-- Per-comic settings (reading direction is already persisted), and an ML-based detector option.
+Third-party libraries, the bundled model, fonts, and brand assets keep their own licenses; the full
+audit and obligations (including the **LGPL** 7-Zip component and **Manga109-s** model-data
+disclosure) are in [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md). The **Chika / Chitra Katha**
+name, logo, and brand assets are owned by Chakra (Chalchitra Krida) and are not covered by the code
+license.
+
+## Acknowledgements
+
+- Panel-detection model: [`leoxs22/manga-panel-detector-yolo26n`](https://huggingface.co/leoxs22/manga-panel-detector-yolo26n) (Apache-2.0), trained on Manga109-s.
+- Fonts: **Anton** and **Archivo** (SIL Open Font License 1.1).
+- **OpenCV**, **TensorFlow Lite**, **Apache Commons Compress**, **7-Zip-JBinding-4Android**.

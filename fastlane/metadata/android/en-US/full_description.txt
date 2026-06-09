@@ -1,0 +1,19 @@
+Chika is a panel-by-panel comic reader. Open a CBZ or CBR file and Chika detects the panels on each
+page with an on-device machine-learning model, then guides you through them one tap at a time:
+page, then panel by panel, then back out to the whole page before turning to the next one. It turns
+pinch-and-squint full-page reading into a comfortable, guided experience on a phone.
+
+Features:
+
+* Reads CBZ and CBR archives, including RAR5.
+* On-device panel detection — a small neural model finds panels and speech balloons. Fully offline;
+  nothing is uploaded.
+* Smart grouping — tiny adjacent panels are merged into one comfortable zoom, and oversized panels
+  are split with a bubble-aware cut.
+* Reader controls — tap to step through panels, swipe to turn pages, pinch and drag to pan, a page
+  scrubber, a "show whole page" button, and a left-to-right / right-to-left (manga) toggle.
+* Library — import comics from your device, cover thumbnails, and resume exactly where you left off
+  (page and panel).
+* No accounts, no ads, no trackers, no network access.
+
+Chika is free and open source (Mozilla Public License 2.0).
