@@ -75,16 +75,25 @@ CI builds the debug APK on every push/PR — see [`.github/workflows/ci.yml`](.g
 
 ## Architecture
 
+The platform-independent core lives in `:shared`, a Kotlin Multiplatform module (JVM + iOS
+targets) that `:app` consumes; it is the foundation for a future iOS app.
+
 ```
-data/archive   ComicArchive: ZipComicArchive (CBZ), RarComicArchive (CBR/RAR5 via 7-Zip-JBinding)
-data/page      PageLoader — downsampling decode + LRU bitmap cache
-data/db        Room (ComicEntity / dao / db)
-data/library   LibraryRepository — import (copy + cover), list, progress, delete
-detection      MlPanelDetector (TFLite) · PanelPlanner (merge/divide) · PanelOrdering · whole-page fallback
-ui/reader      ReaderViewModel (page→panel state machine) + ReaderScreen (camera, gestures, chrome)
-ui/library     LibraryViewModel + LibraryScreen
-ui/brand       Chika component kit (mark, reticle, halftone, starburst, page coin, wordmark)
-ui/theme       palette + Anton/Archivo typography
+:shared (commonMain — pure Kotlin, unit-tested)
+  data/archive   ComicArchive interface · image-entry filter · natural page ordering
+  detection      Panel model · PanelOrdering (reading order) · PanelPlanner (merge/divide)
+  ui/reader      camera math — panel framing (contain fit) + camera lerp
+
+:app (Android)
+  data/archive   ZipComicArchive (CBZ), RarComicArchive (CBR/RAR5 via 7-Zip-JBinding)
+  data/page      PageLoader — downsampling decode + LRU bitmap cache
+  data/db        Room (ComicEntity / dao / db)
+  data/library   LibraryRepository — import (copy + cover), list, progress, delete
+  detection      MlPanelDetector (TFLite) · whole-page fallback
+  ui/reader      ReaderViewModel (page→panel state machine) + ReaderScreen (camera, gestures, chrome)
+  ui/library     LibraryViewModel + LibraryScreen
+  ui/brand       Chika component kit (mark, reticle, halftone, starburst, page coin, wordmark)
+  ui/theme       palette + Anton/Archivo typography
 ```
 
 **Stack:** Kotlin · Jetpack Compose (Material 3) · Coroutines · Room · TensorFlow Lite ·
