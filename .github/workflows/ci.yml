@@ -94,3 +94,52 @@ jobs:
 
       - name: Run common tests on iOS simulator
         run: ./gradlew :shared:iosSimulatorArm64Test --stacktrace
+
+  # Builds the unsigned iOS app IPA. Sideload it onto a device with AltStore/Sideloadly (it is
+  # signed at install time with the user's own Apple ID), or sign in a release pipeline later.
+  ios-app:
+    name: iOS app (unsigned IPA)
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Make gradlew executable
+        run: chmod +x ./gradlew
+
+      - name: Build Kotlin shared framework (device)
+        run: ./gradlew :shared:linkReleaseFrameworkIosArm64 --stacktrace
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        run: xcodegen generate --spec iosApp/project.yml --project iosApp
+
+      - name: Build app (unsigned)
+        run: |
+          xcodebuild -project iosApp/Chika.xcodeproj -scheme Chika -configuration Release \
+            -sdk iphoneos -derivedDataPath iosApp/build \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build
+
+      - name: Package IPA
+        run: |
+          mkdir -p Payload
+          cp -R "iosApp/build/Build/Products/Release-iphoneos/Chika.app" Payload/
+          zip -qry Chika-unsigned.ipa Payload
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: chika-ios-unsigned-ipa
+          path: Chika-unsigned.ipa
+          if-no-files-found: error

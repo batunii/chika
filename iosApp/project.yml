@@ -1,0 +1,58 @@
+# XcodeGen spec for the Chika iOS app. The Xcode project is generated, not committed:
+#   xcodegen generate --spec iosApp/project.yml --project iosApp
+# The Kotlin :shared framework is built by a pre-build script phase (and explicitly in CI), so
+# opening the generated project in Xcode "just works" as long as a JDK is on PATH.
+name: Chika
+options:
+  bundleIdPrefix: com.chakra
+  deploymentTarget:
+    iOS: "16.0"
+
+settings:
+  base:
+    SWIFT_VERSION: "5.9"
+
+targets:
+  Chika:
+    type: application
+    platform: iOS
+    sources:
+      - path: Sources
+    info:
+      path: Sources/Info.plist
+      properties:
+        CFBundleDisplayName: Chika
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.chakra.comicreader
+        TARGETED_DEVICE_FAMILY: "1,2"
+        FRAMEWORK_SEARCH_PATHS:
+          - "$(SRCROOT)/../shared/build/bin/iosArm64/releaseFramework"
+        "FRAMEWORK_SEARCH_PATHS[sdk=iphonesimulator*]":
+          - "$(SRCROOT)/../shared/build/bin/iosSimulatorArm64/releaseFramework"
+        OTHER_LDFLAGS:
+          - "-framework"
+          - "ChikaShared"
+    preBuildScripts:
+      - name: Build Kotlin shared framework
+        script: |
+          cd "$SRCROOT/.."
+          if [ "$PLATFORM_NAME" = "iphonesimulator" ]; then
+            ./gradlew :shared:linkReleaseFrameworkIosSimulatorArm64
+          else
+            ./gradlew :shared:linkReleaseFrameworkIosArm64
+          fi
+        basedOnDependencyAnalysis: false
+
+schemes:
+  Chika:
+    build:
+      targets:
+        Chika: all
+    run:
+      config: Debug
+    archive:
+      config: Release
