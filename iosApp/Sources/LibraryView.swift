@@ -41,8 +41,15 @@ struct LibraryView: View {
             .navigationDestination(for: URL.self) { url in
                 ReaderView(comicURL: url).onDisappear { reloadProgress() }
             }
-            .sheet(isPresented: $showPicker) {
-                DocumentPicker { urls in urls.forEach(library.importComic) }
+            .fileImporter(
+                isPresented: $showPicker,
+                allowedContentTypes: LibraryStore.importableTypes,
+                allowsMultipleSelection: true
+            ) { result in
+                switch result {
+                case .success(let urls): urls.forEach(library.importComic)
+                case .failure(let error): library.importError = error.localizedDescription
+                }
             }
             .alert("Import failed", isPresented: Binding(
                 get: { library.importError != nil },
@@ -110,10 +117,18 @@ struct LibraryView: View {
             Spacer()
             ChikaMark(size: 72)
             Text("NO COMICS YET").font(.anton(22)).foregroundColor(Chika.cream)
-            KickerText("Tap + to import a CBZ from Files")
+            KickerText("Tap + to import a CBZ/CBR from Files")
+            // Diagnostic: shows what the app actually sees on disk, so an import-vs-render issue is
+            // visible. Tap the storage line to re-scan.
+            Text(library.storageReport)
+                .font(.system(size: 10, design: .monospaced))
+                .foregroundColor(Chika.creamMuted)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 24)
+                .onTapGesture { library.refresh() }
             Spacer()
         }
-        .frame(maxWidth: .infinity)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     /// Best-effort issue label from the filename (e.g. "...01" → "01"), else a stable index.
