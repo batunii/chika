@@ -27,6 +27,11 @@ struct ReaderView: View {
     @State private var detecting = false
     @State private var rightToLeft = false
     @State private var showChrome = true
+    // Manual zoom/pan layered on top of the panel-framing camera (pinch to zoom, drag to pan).
+    @State private var zoom: CGFloat = 1
+    @State private var steadyZoom: CGFloat = 1
+    @State private var pan: CGSize = .zero
+    @State private var steadyPan: CGSize = .zero
 
     private var title: String { comicURL.deletingPathExtension().lastPathComponent.uppercased() }
     private var camera: Panel {
@@ -74,9 +79,23 @@ struct ReaderView: View {
     private func loadPage(_ archive: CbzArchive, restoreStep: Int = -1) {
         step = restoreStep
         regions = [Panel.companion.FULL_PAGE]
+        resetZoom()
         image = (try? archive.readPage(page)).flatMap(UIImage.init(data:))
         persist()
         redetect()
+    }
+
+    private func resetZoom() {
+        zoom = 1; steadyZoom = 1; pan = .zero; steadyPan = .zero
+    }
+
+    /// Turns a whole page (resetting to the page view). [next] is reading-forward; RTL is handled
+    /// by the caller mirroring the swipe direction.
+    private func turnPage(next: Bool, in archive: CbzArchive) {
+        let target = page + (next ? 1 : -1)
+        guard target >= 0, target < Int(archive.pageCount) else { return }
+        page = target
+        loadPage(archive)
     }
 
     private func persist() {
@@ -117,6 +136,8 @@ struct ReaderView: View {
                         .frame(width: CGFloat(draw.scaledWidth), height: CGFloat(draw.scaledHeight))
                         .offset(x: CGFloat(draw.left), y: CGFloat(draw.top))
                         .frame(width: geo.size.width, height: geo.size.height, alignment: .topLeading)
+                        .scaleEffect(zoom)
+                        .offset(pan)
                         .animation(.spring(response: 0.45, dampingFraction: 0.85), value: step)
                         .animation(.spring(response: 0.45, dampingFraction: 0.85), value: page)
                 } else {
@@ -127,12 +148,43 @@ struct ReaderView: View {
             .clipped()
             .overlay { if showChrome { Reticle(color: Chika.cream, inset: 6) } }
             .contentShape(Rectangle())
+            // Pinch to zoom; drag to pan when zoomed, or swipe to turn the page when not.
+            .gesture(
+                SimultaneousGesture(
+                    MagnificationGesture()
+                        .onChanged { value in zoom = min(max(steadyZoom * value, 1), 5) }
+                        .onEnded { _ in
+                            if zoom <= 1.01 { resetZoom() } else { steadyZoom = zoom }
+                        },
+                    DragGesture(minimumDistance: 14)
+                        .onChanged { value in
+                            guard zoom > 1.01 else { return }
+                            pan = CGSize(width: steadyPan.width + value.translation.width,
+                                         height: steadyPan.height + value.translation.height)
+                        }
+                        .onEnded { value in
+                            if zoom > 1.01 { steadyPan = pan; return }
+                            let dx = value.translation.width
+                            guard abs(dx) > 50, abs(dx) > abs(value.translation.height) else { return }
+                            // swipe-left advances in LTR (and is mirrored under RTL)
+                            turnPage(next: (dx < 0) != rightToLeft, in: archive)
+                        }
+                )
+            )
             .gesture(
                 SpatialTapGesture().onEnded { value in
+                    guard zoom <= 1.01 else { withAnimation { showChrome.toggle() }; return }
                     let x = value.location.x
                     if x > geo.size.width * 0.66 { advance(by: 1, in: archive) }
                     else if x < geo.size.width * 0.33 { advance(by: -1, in: archive) }
                     else { withAnimation { showChrome.toggle() } }
+                }
+            )
+            .highPriorityGesture(
+                TapGesture(count: 2).onEnded {
+                    withAnimation(.spring(response: 0.35)) {
+                        if zoom > 1.01 { resetZoom() } else { zoom = 2.5; steadyZoom = 2.5 }
+                    }
                 }
             )
         }
@@ -198,6 +250,7 @@ struct ReaderView: View {
             page -= 1; loadPage(archive)
         } else {
             step = next
+            resetZoom()
             persist()
         }
     }

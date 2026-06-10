@@ -40,11 +40,16 @@ final class LibraryStore: ObservableObject {
                 refresh()
             }
         } else {
-            // CBZ/ZIP: the picker hands us an owned copy; move (or copy) it into the library.
-            let dest = dir.appendingPathComponent(url.lastPathComponent)
+            // CBZ/ZIP: the picker hands us an owned copy. Normalize to a .cbz name so the directory
+            // scan in refresh() finds it — a picked .zip is the same ZIP container the reader reads.
+            let dest = dir.appendingPathComponent(url.deletingPathExtension().lastPathComponent + ".cbz")
             try? FileManager.default.removeItem(at: dest)
-            do { try FileManager.default.moveItem(at: url, to: dest) }
-            catch { try? FileManager.default.copyItem(at: url, to: dest) }
+            do {
+                do { try FileManager.default.moveItem(at: url, to: dest) }
+                catch { try FileManager.default.copyItem(at: url, to: dest) }
+            } catch {
+                importError = "Couldn't import \(url.lastPathComponent): \(error.localizedDescription)"
+            }
             refresh()
         }
     }

@@ -1,0 +1,75 @@
+name: Release iOS
+
+# Phase 2 — publish a sideloadable iOS build. Pushing a tag like `ios-v0.1.0` (or running this
+# manually) builds the unsigned IPA and attaches it to a GitHub Release with install instructions.
+# Unsigned by design: users sign it at install time with their own free Apple ID via AltStore /
+# Sideloadly — no Apple Developer Program needed.
+on:
+  push:
+    tags: [ "ios-v*" ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build and publish unsigned IPA
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Make gradlew executable
+        run: chmod +x ./gradlew
+
+      - name: Build Kotlin shared framework (device)
+        run: ./gradlew :shared:linkReleaseFrameworkIosArm64 --stacktrace
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        run: xcodegen generate --spec iosApp/project.yml --project iosApp
+
+      - name: Build app (unsigned)
+        run: |
+          xcodebuild -project iosApp/Chika.xcodeproj -scheme Chika -configuration Release \
+            -sdk iphoneos -derivedDataPath iosApp/build \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build
+
+      - name: Package IPA
+        run: |
+          mkdir -p Payload
+          cp -R "iosApp/build/Build/Products/Release-iphoneos/Chika.app" Payload/
+          zip -qry Chika-unsigned.ipa Payload
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: Chika-unsigned.ipa
+          fail_on_unmatched_files: true
+          body: |
+            ## Chika for iOS — unsigned build
+
+            Panel-by-panel comic reader. This IPA is **unsigned**: you sign it at install
+            time with your own (free) Apple ID — no Apple Developer Program required.
+
+            ### Install
+            1. Download `Chika-unsigned.ipa` below.
+            2. Install it with **[AltStore](https://altstore.io)** or **[Sideloadly](https://sideloadly.io)**,
+               entering your Apple ID when prompted (it signs the app for your device).
+            3. On the iPhone: **Settings → General → VPN & Device Management** → trust your Apple ID;
+               then **Settings → Privacy & Security → Developer Mode** → on, and restart.
+            4. Open **Chika**, tap **+** to import a CBZ/CBR from Files, and read.
+
+            > Apps signed with a free Apple ID expire after 7 days — reconnect and re-install to refresh.
