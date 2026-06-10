@@ -4,7 +4,7 @@ import SwiftUI
 struct ChikaApp: App {
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            LibraryView()
         }
     }
 }

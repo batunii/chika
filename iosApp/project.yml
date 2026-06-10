@@ -12,12 +12,19 @@ settings:
   base:
     SWIFT_VERSION: "5.9"
 
+packages:
+  ZIPFoundation:
+    url: https://github.com/weichsel/ZIPFoundation
+    from: "0.9.19"
+
 targets:
   Chika:
     type: application
     platform: iOS
     sources:
       - path: Sources
+    dependencies:
+      - package: ZIPFoundation
     info:
       path: Sources/Info.plist
       properties:
@@ -25,6 +32,21 @@ targets:
         UILaunchScreen: {}
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
+        LSSupportsOpeningDocumentsInPlace: false
+        CFBundleDocumentTypes:
+          - CFBundleTypeName: Comic Book Archive
+            LSHandlerRank: Alternate
+            LSItemContentTypes:
+              - com.chakra.comicreader.cbz
+              - public.zip-archive
+        UTImportedTypeDeclarations:
+          - UTTypeIdentifier: com.chakra.comicreader.cbz
+            UTTypeDescription: Comic Book ZIP Archive
+            UTTypeConformsTo:
+              - public.zip-archive
+            UTTypeTagSpecification:
+              public.filename-extension:
+                - cbz
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.chakra.comicreader

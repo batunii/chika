@@ -5,7 +5,7 @@ import ChikaShared
 /// merge/divide planning, computePageDraw → camera framing) over a sample page layout, with the
 /// same tap-to-step interaction as the Android reader. Replaced by the real reader once archive
 /// import and ML detection land on iOS.
-struct ContentView: View {
+struct PipelineDemoView: View {
 
     // Chika palette.
     private let ink = Color(red: 0.10, green: 0.09, blue: 0.08)
