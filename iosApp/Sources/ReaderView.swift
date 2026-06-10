@@ -60,18 +60,27 @@ struct ReaderView: View {
             let archive = try CbzArchive(url: comicURL)
             guard archive.pageCount > 0 else { state = .failed("No image pages found in this archive"); return }
             pageCount = Int(archive.pageCount)
+            // Resume where we left off (page and panel), clamped to the current page count.
+            if let saved = ReadingProgress.get(comicURL) {
+                page = min(max(saved.page, 0), pageCount - 1)
+            }
             state = .ready(archive)
-            loadPage(archive)
+            loadPage(archive, restoreStep: ReadingProgress.get(comicURL)?.step ?? -1)
         } catch {
             state = .failed("Could not open archive: \(error.localizedDescription)")
         }
     }
 
-    private func loadPage(_ archive: CbzArchive) {
-        step = -1
+    private func loadPage(_ archive: CbzArchive, restoreStep: Int = -1) {
+        step = restoreStep
         regions = [Panel.companion.FULL_PAGE]
         image = (try? archive.readPage(page)).flatMap(UIImage.init(data:))
+        persist()
         redetect()
+    }
+
+    private func persist() {
+        ReadingProgress.set(comicURL, page: page, step: step, total: pageCount)
     }
 
     private func redetect() {
@@ -84,6 +93,7 @@ struct ReaderView: View {
             DispatchQueue.main.async {
                 guard forPage == page else { return }
                 regions = found
+                if step >= found.count { step = found.count - 1 } // keep a restored panel in range
                 detecting = false
             }
         }
@@ -188,6 +198,7 @@ struct ReaderView: View {
             page -= 1; loadPage(archive)
         } else {
             step = next
+            persist()
         }
     }
 }

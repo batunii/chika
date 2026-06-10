@@ -16,6 +16,7 @@
 			<key>LSItemContentTypes</key>
 			<array>
 				<string>com.chakra.comicreader.cbz</string>
+				<string>com.chakra.comicreader.cbr</string>
 				<string>public.zip-archive</string>
 			</array>
 		</dict>
@@ -63,6 +64,23 @@
 				<key>public.filename-extension</key>
 				<array>
 					<string>cbz</string>
+				</array>
+			</dict>
+		</dict>
+		<dict>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.data</string>
+			</array>
+			<key>UTTypeDescription</key>
+			<string>Comic Book RAR Archive</string>
+			<key>UTTypeIdentifier</key>
+			<string>com.chakra.comicreader.cbr</string>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>cbr</string>
 				</array>
 			</dict>
 		</dict>

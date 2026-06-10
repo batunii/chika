@@ -9,6 +9,8 @@ struct DocumentPicker: UIViewControllerRepresentable {
     func makeUIViewController(context: Context) -> UIDocumentPickerViewController {
         var types: [UTType] = [.zip]
         if let cbz = UTType(filenameExtension: "cbz") { types.append(cbz) }
+        if let cbr = UTType(filenameExtension: "cbr") { types.append(cbr) }
+        if let rar = UTType(filenameExtension: "rar") { types.append(rar) }
         let picker = UIDocumentPickerViewController(forOpeningContentTypes: types, asCopy: true)
         picker.allowsMultipleSelection = true
         picker.delegate = context.coordinator

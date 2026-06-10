@@ -1,11 +1,13 @@
 import Foundation
 
-/// Comics live as plain .cbz files in Documents/Comics — no database yet. Import copies the picked
-/// file in; the list is just a directory scan. (Resume state and covers come with the real
-/// library port.)
+/// Comics live as plain .cbz files in Documents/Comics. Importing a CBZ/ZIP copies it in; importing
+/// a CBR/RAR converts it to CBZ first (see CbrConverter) so the reader only handles ZIP. The list
+/// is a directory scan; per-comic resume lives in ReadingProgress.
 @MainActor
 final class LibraryStore: ObservableObject {
     @Published private(set) var comics: [URL] = []
+    @Published var importing = false
+    @Published var importError: String?
 
     private let dir: URL
 
@@ -17,29 +19,39 @@ final class LibraryStore: ObservableObject {
     }
 
     func refresh() {
-        let files = (try? FileManager.default.contentsOfDirectory(
-            at: dir, includingPropertiesForKeys: nil)) ?? []
+        let files = (try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)) ?? []
         comics = files
-            .filter { ["cbz", "zip"].contains($0.pathExtension.lowercased()) }
-            .sorted {
-                $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending
-            }
+            .filter { $0.pathExtension.lowercased() == "cbz" }
+            .sorted { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending }
     }
 
-    /// Imports a picker-provided copy (UIDocumentPicker asCopy gives us a temp file we own).
     func importComic(from url: URL) {
-        let dest = dir.appendingPathComponent(url.lastPathComponent)
-        try? FileManager.default.removeItem(at: dest)
-        do {
-            try FileManager.default.moveItem(at: url, to: dest)
-        } catch {
-            try? FileManager.default.copyItem(at: url, to: dest)
+        let ext = url.pathExtension.lowercased()
+        if ext == "cbr" || ext == "rar" {
+            let dest = dir.appendingPathComponent(url.deletingPathExtension().lastPathComponent + ".cbz")
+            importing = true
+            Task {
+                do {
+                    try await CbrConverter.convertToCbz(source: url, destination: dest)
+                } catch {
+                    importError = "Couldn't import \(url.lastPathComponent): \(error.localizedDescription)"
+                }
+                importing = false
+                refresh()
+            }
+        } else {
+            // CBZ/ZIP: the picker hands us an owned copy; move (or copy) it into the library.
+            let dest = dir.appendingPathComponent(url.lastPathComponent)
+            try? FileManager.default.removeItem(at: dest)
+            do { try FileManager.default.moveItem(at: url, to: dest) }
+            catch { try? FileManager.default.copyItem(at: url, to: dest) }
+            refresh()
         }
-        refresh()
     }
 
     func delete(_ url: URL) {
         try? FileManager.default.removeItem(at: url)
+        ReadingProgress.clear(url)
         refresh()
     }
 }

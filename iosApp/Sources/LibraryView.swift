@@ -6,6 +6,9 @@ import SwiftUI
 struct LibraryView: View {
     @StateObject private var library = LibraryStore()
     @State private var showPicker = false
+    // Resume snapshot keyed by filename, refreshed on appear and when returning from the reader so
+    // cards show fresh progress without resetting scroll position.
+    @State private var progress: [String: Progress] = [:]
 
     private let columns = [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)]
 
@@ -23,13 +26,40 @@ struct LibraryView: View {
                         grid
                     }
                 }
+
+                if library.importing {
+                    VStack(spacing: 10) {
+                        ProgressView().tint(Chika.ochre)
+                        KickerText("Converting CBR…")
+                    }
+                    .padding(24)
+                    .background(Chika.inkSoft.opacity(0.95))
+                    .clipShape(RoundedCornerShape(cornerRadius: 6))
+                }
             }
             .navigationBarHidden(true)
-            .navigationDestination(for: URL.self) { ReaderView(comicURL: $0) }
+            .navigationDestination(for: URL.self) { url in
+                ReaderView(comicURL: url).onDisappear { reloadProgress() }
+            }
             .sheet(isPresented: $showPicker) {
                 DocumentPicker { urls in urls.forEach(library.importComic) }
             }
+            .alert("Import failed", isPresented: Binding(
+                get: { library.importError != nil },
+                set: { if !$0 { library.importError = nil } }
+            )) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text(library.importError ?? "")
+            }
+            .onAppear(perform: reloadProgress)
         }
+    }
+
+    private func reloadProgress() {
+        var map: [String: Progress] = [:]
+        for url in library.comics { map[url.lastPathComponent] = ReadingProgress.get(url) }
+        progress = map
     }
 
     private var header: some View {
@@ -60,7 +90,7 @@ struct LibraryView: View {
             LazyVGrid(columns: columns, spacing: 16) {
                 ForEach(library.comics, id: \.self) { url in
                     NavigationLink(value: url) {
-                        ComicCard(url: url, issue: issueNumber(url))
+                        ComicCard(url: url, issue: issueNumber(url), progress: progress[url.lastPathComponent] ?? nil)
                     }
                     .buttonStyle(.plain)
                     .contextMenu {
@@ -101,49 +131,65 @@ struct LibraryView: View {
 struct ComicCard: View {
     let url: URL
     let issue: String
+    let progress: Progress?
     @State private var cover: UIImage?
 
     private var title: String { url.deletingPathExtension().lastPathComponent.uppercased() }
 
     var body: some View {
-        ZStack(alignment: .bottomLeading) {
-            Group {
-                if let cover {
-                    Image(uiImage: cover).resizable().aspectRatio(contentMode: .fill)
-                } else {
-                    ZStack {
-                        Chika.maroon
-                        Halftone(color: Chika.ink, alpha: 0.18)
+        VStack(alignment: .leading, spacing: 6) {
+            ZStack(alignment: .bottomLeading) {
+                Group {
+                    if let cover {
+                        Image(uiImage: cover).resizable().aspectRatio(contentMode: .fill)
+                    } else {
+                        ZStack {
+                            Chika.maroon
+                            Halftone(color: Chika.ink, alpha: 0.18)
+                        }
                     }
                 }
+                .frame(height: 220)
+                .frame(maxWidth: .infinity)
+                .clipped()
+
+                LinearGradient(colors: [.clear, Chika.ink.opacity(0.85)], startPoint: .center, endPoint: .bottom)
+
+                Text(title)
+                    .font(.anton(20)).foregroundColor(Chika.cream).lineLimit(2)
+                    .padding(12)
+
+                KickerText("Issue \(issue)", size: 8, color: Chika.creamMuted)
+                    .padding(10)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             }
             .frame(height: 220)
-            .frame(maxWidth: .infinity)
-            .clipped()
+            .clipShape(RoundedCornerShape(cornerRadius: 4))
+            .overlay(RoundedCornerShape(cornerRadius: 4).stroke(Chika.ink, lineWidth: 2))
+            .comicShadow(offset: 4, color: .black.opacity(0.55), corner: 4)
 
-            LinearGradient(
-                colors: [.clear, Chika.ink.opacity(0.85)],
-                startPoint: .center, endPoint: .bottom
-            )
-
-            VStack(alignment: .leading, spacing: 4) {
-                Spacer()
-                Text(title)
-                    .font(.anton(20))
-                    .foregroundColor(Chika.cream)
-                    .lineLimit(2)
-            }
-            .padding(12)
-
-            KickerText("Issue \(issue)", size: 8, color: Chika.creamMuted)
-                .padding(10)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            progressFooter
         }
-        .frame(height: 220)
-        .clipShape(RoundedCornerShape(cornerRadius: 4))
-        .overlay(RoundedCornerShape(cornerRadius: 4).stroke(Chika.ink, lineWidth: 2))
-        .comicShadow(offset: 4, color: .black.opacity(0.55), corner: 4)
-        .task { cover = await CoverLoader.cover(for: url) }
+    }
+
+    @ViewBuilder
+    private var progressFooter: some View {
+        if let progress, progress.total > 0 {
+            VStack(alignment: .leading, spacing: 3) {
+                GeometryReader { geo in
+                    ZStack(alignment: .leading) {
+                        Capsule().fill(Chika.inkSoft).frame(height: 3)
+                        Capsule().fill(Chika.ochre)
+                            .frame(width: max(3, geo.size.width * progress.fraction), height: 3)
+                    }
+                }
+                .frame(height: 3)
+                KickerText("\(progress.percent)% · pg \(progress.page + 1)/\(progress.total)", size: 7)
+            }
+            .padding(.horizontal, 2)
+        } else {
+            KickerText("Unread", size: 7).padding(.horizontal, 2)
+        }
     }
 }
 

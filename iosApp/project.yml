@@ -16,6 +16,11 @@ packages:
   ZIPFoundation:
     url: https://github.com/weichsel/ZIPFoundation
     from: "0.9.19"
+  # FOSS RAR5 reader (BSD-licensed libarchive, prebuilt xcframework) — used to convert imported
+  # CBR/RAR archives to CBZ on import so the reader only ever handles plain ZIP.
+  SwiftArchive:
+    url: https://github.com/matteo-pacini/libarchive-for-swift
+    exactVersion: "1.0.0"
 
 targets:
   Chika:
@@ -25,6 +30,8 @@ targets:
       - path: Sources
     dependencies:
       - package: ZIPFoundation
+      - package: SwiftArchive
+        product: SwiftArchive
     info:
       path: Sources/Info.plist
       properties:
@@ -41,6 +48,7 @@ targets:
             LSHandlerRank: Alternate
             LSItemContentTypes:
               - com.chakra.comicreader.cbz
+              - com.chakra.comicreader.cbr
               - public.zip-archive
         UTImportedTypeDeclarations:
           - UTTypeIdentifier: com.chakra.comicreader.cbz
@@ -50,6 +58,13 @@ targets:
             UTTypeTagSpecification:
               public.filename-extension:
                 - cbz
+          - UTTypeIdentifier: com.chakra.comicreader.cbr
+            UTTypeDescription: Comic Book RAR Archive
+            UTTypeConformsTo:
+              - public.data
+            UTTypeTagSpecification:
+              public.filename-extension:
+                - cbr
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.chakra.comicreader
