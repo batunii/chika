@@ -14,9 +14,15 @@ android {
         applicationId = "com.chakra.comicreader"
         minSdk = 26
         targetSdk = 36
-        // Overridable by CI (release workflow derives these from the git tag).
-        versionCode = System.getenv("VERSION_CODE")?.toIntOrNull() ?: 1
-        versionName = System.getenv("VERSION_NAME") ?: "0.1.0"
+        // versionName comes from the git tag in CI (VERSION_NAME), else this default.
+        // versionCode is derived deterministically from it (MAJOR*10000 + MINOR*100 + PATCH) so it
+        // is reproducible and monotonically increasing across all channels (Play, F-Droid, sideload)
+        // — F-Droid builds from source and requires a stable, increasing versionCode.
+        val appVersionName = System.getenv("VERSION_NAME") ?: "0.1.1"
+        versionName = appVersionName
+        versionCode = appVersionName.split('.').map { it.toIntOrNull() ?: 0 }.let { p ->
+            (p.getOrElse(0) { 0 } * 10000) + (p.getOrElse(1) { 0 } * 100) + p.getOrElse(2) { 0 }
+        }
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables { useSupportLibrary = true }

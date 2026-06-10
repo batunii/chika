@@ -32,16 +32,33 @@ recipe to `fdroiddata` via merge request: https://gitlab.com/fdroid/fdroiddata
 
 Things to handle for the main repo:
 
-- **Versioning:** F-Droid builds from a tag, so the **`versionCode` must be real and increasing in
-  source** for each release (the CI env override is only for Play/IzzyOnDroid APKs). Bump the
-  default `versionCode` in `app/build.gradle.kts` per release, or set it deterministically from the
-  tag in the F-Droid recipe.
+- **Versioning:** ✅ handled — `versionCode` is now derived deterministically from `versionName`
+  (`MAJOR*10000 + MINOR*100 + PATCH`, e.g. `0.1.1` → `101`) in `app/build.gradle.kts`, so it's stable
+  and increasing whether built by CI or by F-Droid from source. Just bump `versionName` per release.
+- **Unsigned release build:** ✅ handled — release signing only activates when the keystore env vars
+  are present (CI), so F-Droid's `assembleRelease` produces an unsigned APK that F-Droid then signs
+  with its own key.
 - **Bundled model blob:** `app/src/main/assets/manga_panel_detector_int8.tflite` is a prebuilt
   binary committed to the repo. It is Apache-2.0 (free) **data**, not executable code, so it is
   generally acceptable, but F-Droid reviewers may ask that it be fetched at build time or flagged.
-- **Reproducible builds** are encouraged (not required). The release signing is already isolated via
-  env vars, which helps.
 - Dependencies from JitPack (7-Zip-JBinding) and Maven are allowed as free binaries.
+
+A ready-to-submit recipe is in [`fdroid/com.chakra.comicreader.yml`](fdroid/com.chakra.comicreader.yml)
+— copy it to `metadata/com.chakra.comicreader.yml` in your `fdroiddata` fork and open the MR.
+
+## Submission materials
+
+**IzzyOnDroid request** — open an issue/RFP at https://codeberg.org/IzzyOnDroid/repo with:
+
+> **App:** Chika — Chitra Katha
+> **Package:** `com.chakra.comicreader`
+> **Source:** https://github.com/batunii/chika
+> **License:** MPL-2.0 (FOSS)
+> **Releases:** signed APKs attached to GitHub Releases (`v*` tags); fastlane metadata in
+> `fastlane/metadata/android/en-US`.
+> **Anti-features:** none — no trackers, no ads, no Google Play Services, no network access.
+> All dependencies are free-licensed (Apache-2.0 / LGPL-2.1 / OFL-1.1) from Maven Central, Google
+> Maven, and JitPack. Please track GitHub releases for updates.
 
 ## Also free: direct distribution
 

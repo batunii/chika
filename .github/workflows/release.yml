@@ -38,7 +38,6 @@ jobs:
         run: |
           TAG="${GITHUB_REF_NAME}"
           echo "name=${TAG#v}" >> "$GITHUB_OUTPUT"
-          echo "code=${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
 
       - name: Decode signing keystore
         run: echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > "${RUNNER_TEMP}/release.jks"
@@ -50,7 +49,6 @@ jobs:
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
           VERSION_NAME: ${{ steps.ver.outputs.name }}
-          VERSION_CODE: ${{ steps.ver.outputs.code }}
         run: |
           chmod +x ./gradlew
           ./gradlew :app:bundleRelease :app:assembleRelease --stacktrace
