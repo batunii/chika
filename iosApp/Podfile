@@ -1,0 +1,12 @@
+# LiteRT / TensorFlow Lite ships for iOS via CocoaPods only (no official SPM). We integrate it on
+# top of the XcodeGen-generated project: run `xcodegen generate` first, then `pod install` (which
+# wires the pod into the generated project and produces Chika.xcworkspace), then build the
+# workspace. ZIPFoundation and libarchive stay as SwiftPM packages in the project — they coexist.
+platform :ios, '16.0'
+use_frameworks!
+
+project 'Chika.xcodeproj'
+
+target 'Chika' do
+  pod 'TensorFlowLiteSwift', '2.17.0'
+end

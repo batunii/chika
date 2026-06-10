@@ -128,9 +128,14 @@ jobs:
       - name: Generate Xcode project
         run: xcodegen generate --spec iosApp/project.yml --project iosApp
 
+      # LiteRT/TensorFlowLiteSwift is CocoaPods-only; pod install (after xcodegen) wires it into the
+      # generated project and produces the workspace we then build.
+      - name: Install pods
+        run: cd iosApp && pod install
+
       - name: Build app (unsigned)
         run: |
-          xcodebuild -project iosApp/Chika.xcodeproj -scheme Chika -configuration Release \
+          xcodebuild -workspace iosApp/Chika.xcworkspace -scheme Chika -configuration Release \
             -sdk iphoneos -derivedDataPath iosApp/build \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build
 

@@ -15,7 +15,7 @@ struct ReaderView: View {
         case ready(CbzArchive)
     }
 
-    private static let detector = CoreMLPanelDetector()
+    private static let detector = LiteRTPanelDetector()
 
     @Environment(\.dismiss) private var dismiss
     @State private var state: LoadState = .loading

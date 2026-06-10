@@ -71,11 +71,16 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.chakra.comicreader
         TARGETED_DEVICE_FAMILY: "1,2"
+        # $(inherited) keeps the values CocoaPods injects via its xcconfig (needed to link
+        # TensorFlowLite) alongside our Kotlin-framework search path / link flag.
         FRAMEWORK_SEARCH_PATHS:
+          - "$(inherited)"
           - "$(SRCROOT)/../shared/build/bin/iosArm64/releaseFramework"
         "FRAMEWORK_SEARCH_PATHS[sdk=iphonesimulator*]":
+          - "$(inherited)"
           - "$(SRCROOT)/../shared/build/bin/iosSimulatorArm64/releaseFramework"
         OTHER_LDFLAGS:
+          - "$(inherited)"
           - "-framework"
           - "ChikaShared"
     preBuildScripts:
