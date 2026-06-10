@@ -21,14 +21,21 @@ at most minor non-free components (flagged). Steps:
 
 1. Cut a release so an APK is attached to a GitHub Release (the `release` workflow does this on a
    `v*` tag — see [`RELEASING.md`](RELEASING.md)).
-2. Request inclusion per https://codeberg.org/IzzyOnDroid/repo (the repo's wiki/issue template).
-   They check the license, scan for anti-features, and pull the APK + the fastlane metadata.
+2. Open an inclusion request issue at **https://codeberg.org/IzzyOnDroid/repodata/issues** (use the
+   inclusion template). They check the license, scan for anti-features, and pull the APK + the
+   fastlane metadata.
 3. Users add the IzzyOnDroid repo to the F-Droid client and install Chika.
 
 ## Route B — F-Droid main repo (more rigorous)
 
-F-Droid builds the app **from source** on their servers and publishes the result. Submit a build
-recipe to `fdroiddata` via merge request: https://gitlab.com/fdroid/fdroiddata
+F-Droid builds the app **from source** on their servers and publishes the result. Everything lives
+on **GitLab** (the `github.com/f-droid/fdroiddata` repo is an **archived read-only mirror — don't
+use it**). Two ways in:
+
+- **Merge request (preferred):** fork **https://gitlab.com/fdroid/fdroiddata/-/merge_requests** and
+  add the metadata recipe.
+- **Request for Packaging (RFP):** if you'd rather the F-Droid team package it, open an issue at
+  **https://gitlab.com/fdroid/rfp/issues**.
 
 Things to handle for the main repo:
 
@@ -48,7 +55,7 @@ A ready-to-submit recipe is in [`fdroid/com.chakra.comicreader.yml`](fdroid/com.
 
 ## Submission materials
 
-**IzzyOnDroid request** — open an issue/RFP at https://codeberg.org/IzzyOnDroid/repo with:
+**IzzyOnDroid request** — open an issue at https://codeberg.org/IzzyOnDroid/repodata/issues with:
 
 > **App:** Chika — Chitra Katha
 > **Package:** `com.chakra.comicreader`
