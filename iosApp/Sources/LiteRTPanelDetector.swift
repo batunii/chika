@@ -80,7 +80,9 @@ final class LiteRTPanelDetector {
                 space: CGColorSpaceCreateDeviceRGB(),
                 bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue // bytes: R,G,B,A
             ) else { return false }
-            ctx.interpolationQuality = .high
+            // Bilinear (.medium) matches Android's Bitmap.createScaledBitmap(filter=true). Bicubic
+            // (.high) perturbs pixels enough to flip borderline detections, breaking parity.
+            ctx.interpolationQuality = .medium
             ctx.setFillColor(red: 114/255, green: 114/255, blue: 114/255, alpha: 1)
             ctx.fill(CGRect(x: 0, y: 0, width: size, height: size))
             // Flip so row 0 of the buffer is the top of the page (upright, matching Android).
