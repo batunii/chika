@@ -10,6 +10,9 @@ import ChikaShared
 final class LiteRTPanelDetector {
     private let interpreter: Interpreter
     private let inputSize = 640
+    // The TFLite interpreter is not thread-safe; serialize inference (matching Android's lock) so
+    // overlapping detections — e.g. while scrubbing pages — can't corrupt it and crash the app.
+    private let lock = NSLock()
     private let decoder = YoloPanelDecoder(
         inputSize: 640,
         confidenceThreshold: 0.25,
@@ -38,6 +41,8 @@ final class LiteRTPanelDetector {
         let lb = Letterbox.companion.fit(pageW: Int32(pageW), pageH: Int32(pageH), inputSize: Int32(inputSize))
         guard let input = letterboxedFloatInput(cg, lb: lb) else { return [Panel.companion.FULL_PAGE] }
 
+        lock.lock()
+        defer { lock.unlock() }
         do {
             let inputData = input.withUnsafeBufferPointer { Data(buffer: $0) }
             try interpreter.copy(inputData, toInputAt: 0)

@@ -17,6 +17,7 @@ struct ReaderView: View {
 
     private static let detector = LiteRTPanelDetector()
     private static let ioQueue = DispatchQueue(label: "chika.reader.io", qos: .userInitiated)
+    private static let detectQueue = DispatchQueue(label: "chika.reader.detect", qos: .userInitiated)
 
     @Environment(\.dismiss) private var dismiss
     @State private var state: LoadState = .loading
@@ -123,7 +124,10 @@ struct ReaderView: View {
         let rtl = rightToLeft
         let forPage = page
         detecting = true
-        DispatchQueue.global(qos: .userInitiated).async {
+        // Serial queue + page guard: scrubbing fast enqueues detections instead of running them
+        // concurrently (the interpreter lock would otherwise just back up threads), and stale
+        // results for a page we've already left are discarded.
+        Self.detectQueue.async {
             let found = detector.zoomRegions(for: img, rightToLeft: rtl)
             DispatchQueue.main.async {
                 guard forPage == page else { return }
