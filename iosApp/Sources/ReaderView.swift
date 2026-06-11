@@ -149,9 +149,9 @@ struct ReaderView: View {
                         bitmapH: Int32(image.cgImage?.height ?? 1),
                         containerW: Float(geo.size.width),
                         containerH: Float(geo.size.height),
-                        // Leave breathing room around each panel instead of filling edge-to-edge —
-                        // edge-to-edge felt like over-zooming on manga's small, dense panels.
-                        fill: 0.86
+                        // 0.98 matches Android's computePageDraw default exactly (Android passes no
+                        // fill arg). Keep these in lock-step so panel framing is identical on both.
+                        fill: 0.98
                     )
                     Image(uiImage: image)
                         .resizable()
