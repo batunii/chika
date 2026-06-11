@@ -16,6 +16,7 @@ struct ReaderView: View {
     }
 
     private static let detector = LiteRTPanelDetector()
+    private static let ioQueue = DispatchQueue(label: "chika.reader.io", qos: .userInitiated)
 
     @Environment(\.dismiss) private var dismiss
     @State private var state: LoadState = .loading
@@ -27,6 +28,7 @@ struct ReaderView: View {
     @State private var detecting = false
     @State private var rightToLeft = false
     @State private var showChrome = true
+    @State private var loadToken = 0
     // Manual zoom/pan layered on top of the panel-framing camera (pinch to zoom, drag to pan).
     @State private var zoom: CGFloat = 1
     @State private var steadyZoom: CGFloat = 1
@@ -76,13 +78,27 @@ struct ReaderView: View {
         }
     }
 
+    /// Loads a page's image OFF the main thread. Reading + decoding a multi-MB page on the main
+    /// thread (e.g. on every slider tick while scrubbing) blocks the UI and gets the app killed by
+    /// the watchdog. A serial queue avoids concurrent ZIP reads (ZIPFoundation isn't thread-safe),
+    /// and a token ensures only the latest page renders when scrubbing fast.
     private func loadPage(_ archive: CbzArchive, restoreStep: Int = -1) {
         step = restoreStep
         regions = [Panel.companion.FULL_PAGE]
         resetZoom()
-        image = (try? archive.readPage(page)).flatMap(UIImage.init(data:))
         persist()
-        redetect()
+
+        loadToken &+= 1
+        let token = loadToken
+        let target = page
+        Self.ioQueue.async {
+            let img = (try? archive.readPage(target)).flatMap(UIImage.init(data:))
+            DispatchQueue.main.async {
+                guard token == self.loadToken else { return } // a newer load superseded this one
+                self.image = img
+                self.redetect()
+            }
+        }
     }
 
     private func resetZoom() {
