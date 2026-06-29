@@ -32,7 +32,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -88,7 +88,7 @@ import java.io.File
 fun LibraryScreen(
     viewModel: LibraryViewModel,
     onOpenComic: (Long) -> Unit,
-    onOpenAbout: () -> Unit,
+    onOpenMenu: () -> Unit,
 ) {
     val comics by viewModel.comics.collectAsStateWithLifecycle()
     val importing by viewModel.importing.collectAsStateWithLifecycle()
@@ -108,7 +108,7 @@ fun LibraryScreen(
         }
     }
 
-    Box(Modifier.fillMaxSize().background(Ink)) {
+    Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         // Subtle full-bleed halftone wash + an action-burst behind the header.
         Box(Modifier.matchParentSize().halftone(Crimson, alpha = 0.05f))
         Box(
@@ -139,12 +139,12 @@ fun LibraryScreen(
                             .size(36.dp)
                             .clip(CircleShape)
                             .background(Cream.copy(alpha = 0.10f))
-                            .clickable(onClick = onOpenAbout),
+                            .clickable(onClick = onOpenMenu),
                         contentAlignment = Alignment.Center,
                     ) {
                         Icon(
-                            Icons.Outlined.Info,
-                            contentDescription = "About Chika",
+                            Icons.Default.Menu,
+                            contentDescription = "Menu",
                             tint = Cream,
                             modifier = Modifier.size(18.dp),
                         )
