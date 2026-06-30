@@ -107,6 +107,61 @@ class PanelPlannerTest {
         }
     }
 
+    @Test
+    fun fullWidthBroadPanelSplitsIntoFour() {
+        // Full width (0.96) AND broad/tall (0.75) → 2×2 grid, read TL, TR, BL, BR.
+        val p = Panel(0.0f, 0.10f, 0.96f, 0.85f)
+        val r = plan(listOf(p))
+        assertEquals(4, r.size)
+        // corners
+        assertEquals(p.left, r[0].left); assertEquals(p.top, r[0].top)      // TL
+        assertEquals(p.right, r[1].right); assertEquals(p.top, r[1].top)    // TR
+        assertEquals(p.left, r[2].left); assertEquals(p.bottom, r[2].bottom) // BL
+        assertEquals(p.right, r[3].right); assertEquals(p.bottom, r[3].bottom) // BR
+        // shared cuts
+        assertEquals(r[0].right, r[1].left)  // vertical cut
+        assertEquals(r[0].bottom, r[2].top)  // horizontal cut
+        assertEquals(r[1].bottom, r[3].top)
+    }
+
+    @Test
+    fun fullWidthShortPanelStillSplitsIntoTwo() {
+        // Full width (0.95) but short (0.30, not broad) → 2 side-by-side.
+        val p = Panel(0.0f, 0.0f, 0.95f, 0.30f)
+        val r = plan(listOf(p))
+        assertEquals(2, r.size)
+        assertEquals(r[0].right, r[1].left)
+    }
+
+    @Test
+    fun doublePageBroadPanelSplitsIntoEight() {
+        // Landscape spread image (aspect 2200/1500 ≈ 1.47); a panel spanning both pages, broad.
+        val spread = Panel(0.0f, 0.10f, 1.0f, 0.85f)
+        val r = PanelPlanner.plan(listOf(spread), emptyList(), 2200, 1500, false)
+        assertEquals(8, r.size)
+        // first 4 belong to the left page, next 4 to the right page
+        assertTrue(r.take(4).all { it.right <= 0.5f + 1e-4f }, "first 4 should be the left page")
+        assertTrue(r.drop(4).all { it.left >= 0.5f - 1e-4f }, "last 4 should be the right page")
+    }
+
+    @Test
+    fun doublePageShortPanelSplitsIntoFour() {
+        // Spread, but the cross-page panel is short → each half halves → 2 + 2 = 4.
+        val spread = Panel(0.0f, 0.30f, 1.0f, 0.60f)
+        val r = PanelPlanner.plan(listOf(spread), emptyList(), 2200, 1500, false)
+        assertEquals(4, r.size)
+        assertTrue(r.take(2).all { it.right <= 0.5f + 1e-4f })
+        assertTrue(r.drop(2).all { it.left >= 0.5f - 1e-4f })
+    }
+
+    @Test
+    fun doublePageRightToLeftEmitsRightPageFirst() {
+        val spread = Panel(0.0f, 0.30f, 1.0f, 0.60f)
+        val r = PanelPlanner.plan(listOf(spread), emptyList(), 2200, 1500, true)
+        assertEquals(4, r.size)
+        assertTrue(r.take(2).all { it.left >= 0.5f - 1e-4f }, "RTL: right page first")
+    }
+
     private fun assertEquals(expected: Float, actual: Float, absoluteTolerance: Float, message: String? = null) {
         assertTrue(
             kotlin.math.abs(expected - actual) <= absoluteTolerance,

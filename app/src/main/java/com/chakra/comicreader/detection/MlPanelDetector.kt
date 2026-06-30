@@ -53,9 +53,10 @@ class MlPanelDetector private constructor(
             Log.e(TAG, "Inference failed; falling back to full page", t)
             DetectResult(emptyList(), emptyList(), page.width, page.height)
         }
-        val ordered = PanelOrdering.order(result.panels, rightToLeft)
-        // Merge tiny panels / divide oversized ones using the detected speech bubbles.
-        val planned = PanelPlanner.plan(ordered, result.bubbles, result.pageW, result.pageH, rightToLeft)
+        // Single shared post-processing path (gap-fill → order → merge/divide), same as iOS.
+        val planned = PanelPipeline.zoomRegions(
+            result.panels, result.bubbles, result.pageW, result.pageH, rightToLeft,
+        )
         Log.i(TAG, "panels=${result.panels.size} bubbles=${result.bubbles.size} planned=${planned.size}")
         if (planned.size < 2) listOf(Panel.FULL_PAGE) else planned
     }

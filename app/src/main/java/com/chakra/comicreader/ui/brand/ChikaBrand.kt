@@ -1,7 +1,6 @@
 package com.chakra.comicreader.ui.brand
 
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
@@ -21,7 +20,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
@@ -29,14 +27,12 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.chakra.comicreader.R
 import com.chakra.comicreader.ui.theme.Anton
 import com.chakra.comicreader.ui.theme.Archivo
 import com.chakra.comicreader.ui.theme.Cream
 import com.chakra.comicreader.ui.theme.CreamMuted
 import com.chakra.comicreader.ui.theme.Crimson
 import com.chakra.comicreader.ui.theme.Ink
-import com.chakra.comicreader.ui.theme.Maroon
 import com.chakra.comicreader.ui.theme.Ochre
 import androidx.compose.material3.Text
 
@@ -118,25 +114,6 @@ fun Reticle(
 }
 
 /* ---- Logo system --------------------------------------------------------------- */
-
-/** The Chika "C" mark on its maroon ground (the three-panel icon), with a hard drop shadow. */
-@Composable
-fun ChikaMark(size: Dp, modifier: Modifier = Modifier) {
-    Box(
-        modifier
-            .size(size)
-            .comicShadow(offset = 3.dp, color = Color(0x99000000))
-            .clip(RoundedCornerShape(size * 0.22f))
-            .background(Maroon),
-        contentAlignment = Alignment.Center,
-    ) {
-        Image(
-            painter = painterResource(R.drawable.ic_chika_mark),
-            contentDescription = "Chika",
-            modifier = Modifier.size(size),
-        )
-    }
-}
 
 /** "CHI·KA / CHITRA KATHA" lockup (cream + crimson Anton over an Archivo kicker). */
 @Composable

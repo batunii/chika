@@ -16,7 +16,13 @@ class AppSettings(context: Context) {
         get() = prefs.getBoolean(KEY_DEFAULT_RTL, false)
         set(value) { prefs.edit().putBoolean(KEY_DEFAULT_RTL, value).apply() }
 
+    /** When true, the app uses a true-black (AMOLED) theme instead of the default ink dark. */
+    var amoledTheme: Boolean
+        get() = prefs.getBoolean(KEY_AMOLED, false)
+        set(value) { prefs.edit().putBoolean(KEY_AMOLED, value).apply() }
+
     private companion object {
         const val KEY_DEFAULT_RTL = "default_rtl"
+        const val KEY_AMOLED = "amoled_theme"
     }
 }

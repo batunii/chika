@@ -18,7 +18,7 @@ android {
         // versionCode is derived deterministically from it (MAJOR*10000 + MINOR*100 + PATCH) so it
         // is reproducible and monotonically increasing across all channels (Play, F-Droid, sideload)
         // — F-Droid builds from source and requires a stable, increasing versionCode.
-        val appVersionName = System.getenv("VERSION_NAME") ?: "0.1.1"
+        val appVersionName = System.getenv("VERSION_NAME") ?: "0.2.0"
         versionName = appVersionName
         versionCode = appVersionName.split('.').map { it.toIntOrNull() ?: 0 }.let { p ->
             (p.getOrElse(0) { 0 } * 10000) + (p.getOrElse(1) { 0 } * 100) + p.getOrElse(2) { 0 }
@@ -45,7 +45,10 @@ android {
 
     buildTypes {
         release {
-            isMinifyEnabled = false
+            // R8 strips the large amount of dead code in the dex (notably the unused
+            // material-icons-extended set); resource shrinking drops unreferenced resources.
+            isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
@@ -75,6 +78,11 @@ android {
     packaging {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
+        }
+        // Compress the native libraries inside the APK (they ship uncompressed by default). This
+        // keeps every ABI but shrinks the download — the libs are extracted at install time.
+        jniLibs {
+            useLegacyPackaging = true
         }
     }
 }

@@ -8,9 +8,7 @@ val InkSoft = Color(0xFF2A201C)
 val Crimson = Color(0xFFD11F2D)
 val CrimsonBright = Color(0xFFE62534)
 val Maroon = Color(0xFF7C1620)
-val MaroonDeep = Color(0xFF5C0F18)
 val Cream = Color(0xFFF3E9D6)
-val Paper = Color(0xFFFAF3E4)
 val Ochre = Color(0xFFE0A22B)
 
 /** Muted cream for secondary metadata text on dark grounds. */

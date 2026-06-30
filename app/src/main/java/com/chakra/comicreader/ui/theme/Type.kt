@@ -2,12 +2,10 @@ package com.chakra.comicreader.ui.theme
 
 import androidx.compose.material3.Typography
 import androidx.compose.ui.text.ExperimentalTextApi
-import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontVariation
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.sp
 import com.chakra.comicreader.R
 
 /** Anton — the display face: wordmark, comic titles, badges, page numbers. */
@@ -51,11 +49,3 @@ val ChikaTypography = Typography().run {
         labelSmall = labelSmall.copy(fontFamily = Archivo, fontWeight = FontWeight.SemiBold),
     )
 }
-
-/** A reusable kicker style (Archivo 800, uppercase, wide tracking) used for tags/labels. */
-val KickerStyle = TextStyle(
-    fontFamily = Archivo,
-    fontWeight = FontWeight.ExtraBold,
-    fontSize = 11.sp,
-    letterSpacing = 2.sp,
-)

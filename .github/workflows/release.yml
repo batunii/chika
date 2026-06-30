@@ -58,6 +58,8 @@ jobs:
         with:
           generate_release_notes: true
           fail_on_unmatched_files: true
+          # Tags with a suffix (e.g. v0.2.0-beta, v1.0.0-rc1) publish as a GitHub pre-release.
+          prerelease: ${{ contains(github.ref_name, '-') }}
           files: |
             app/build/outputs/bundle/release/*.aab
             app/build/outputs/apk/release/*.apk
