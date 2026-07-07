@@ -4,8 +4,10 @@ import SwiftUI
 /// wash, the three-panel mark + CHI·KA wordmark, an ochre "YOUR LIBRARY" badge, and a two-column
 /// grid of comic cards with issue tags and Anton titles.
 struct LibraryView: View {
+    @EnvironmentObject private var settings: ChikaSettings
     @StateObject private var library = LibraryStore()
     @State private var showPicker = false
+    @State private var showMenu = false
     // Resume snapshot keyed by filename, refreshed on appear and when returning from the reader so
     // cards show fresh progress without resetting scroll position.
     @State private var progress: [String: Progress] = [:]
@@ -20,7 +22,7 @@ struct LibraryView: View {
     var body: some View {
         NavigationStack(path: $path) {
             ZStack {
-                Chika.ink.ignoresSafeArea()
+                settings.ground.ignoresSafeArea()
                 Halftone(color: Chika.cream, alpha: 0.05).ignoresSafeArea()
 
                 VStack(spacing: 0) {
@@ -45,6 +47,9 @@ struct LibraryView: View {
             .navigationBarHidden(true)
             .navigationDestination(for: URL.self) { url in
                 ReaderView(comicURL: url).onDisappear { reloadProgress() }
+            }
+            .fullScreenCover(isPresented: $showMenu) {
+                MenuView().environmentObject(settings)
             }
             .fileImporter(
                 isPresented: $showPicker,
@@ -92,6 +97,14 @@ struct LibraryView: View {
                 ChikaMark(size: 40)
                 ChikaWordmark()
                 Spacer()
+                Button { showMenu = true } label: {
+                    Image(systemName: "line.3.horizontal")
+                        .font(.system(size: 18, weight: .bold))
+                        .foregroundColor(Chika.cream)
+                        .frame(width: 38, height: 38)
+                        .background(Chika.cream.opacity(0.10))
+                        .clipShape(Circle())
+                }
                 Button { showPicker = true } label: {
                     Image(systemName: "plus")
                         .font(.system(size: 18, weight: .bold))

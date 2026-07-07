@@ -49,7 +49,7 @@ import com.chakra.comicreader.ui.theme.Ink
 import com.chakra.comicreader.ui.theme.InkSoft
 import com.chakra.comicreader.ui.theme.Ochre
 
-private const val DONATION_URL = "https://batunii.github.io"
+private const val DONATION_URL = "https://github.com/batunii/chika"
 
 @Composable
 fun MenuScreen(
@@ -172,7 +172,7 @@ fun MenuScreen(
             }
             Spacer(Modifier.size(6.dp))
             Text(
-                "batunii.github.io",
+                "github.com/batunii/chika",
                 fontFamily = Archivo,
                 fontWeight = FontWeight.SemiBold,
                 fontSize = 11.sp,

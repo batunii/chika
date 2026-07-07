@@ -20,6 +20,7 @@ struct ReaderView: View {
     private static let detectQueue = DispatchQueue(label: "chika.reader.detect", qos: .userInitiated)
 
     @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var settings: ChikaSettings
     @State private var state: LoadState = .loading
     @State private var page = 0
     @State private var pageCount = 1
@@ -51,7 +52,7 @@ struct ReaderView: View {
 
     var body: some View {
         ZStack {
-            Chika.ink.ignoresSafeArea()
+            settings.ground.ignoresSafeArea()
             switch state {
             case .loading:
                 ProgressView().tint(Chika.ochre)
