@@ -19,6 +19,14 @@ struct ReaderView: View {
     private static let ioQueue = DispatchQueue(label: "chika.reader.io", qos: .userInitiated)
     private static let detectQueue = DispatchQueue(label: "chika.reader.detect", qos: .userInitiated)
 
+    // Gesture tuning ported verbatim from Android's ReaderScreen so the reader "zones" behave
+    // identically: a tap is deferred this long so a second tap reads as a double-tap; a page turn
+    // needs a genuine horizontal *flick* (velocity, not distance), biased against vertical drags.
+    private static let doubleTapWindow = 0.22          // Android DOUBLE_TAP_WINDOW_MS = 220ms
+    private static let flickVelocityPxS: CGFloat = 700  // Android FLICK_VELOCITY_PX_S
+    private static let swipeHorizontalBias: CGFloat = 1.2 // Android SWIPE_HORIZONTAL_BIAS
+    private static let tapSlop: CGFloat = 10            // movement under this counts as a tap, not a drag
+
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var settings: ChikaSettings
     @State private var state: LoadState = .loading
@@ -43,6 +51,11 @@ struct ReaderView: View {
     @State private var steadyPan: CGSize = .zero
     // How tightly a panel fills the screen; user-cyclable for taste (display-only, no detect impact).
     @State private var fill: Float = ReadingPrefs.zoomFill
+    // Pending deferred single tap (cancelled by a second tap → double-tap recenter), and the last
+    // drag sample used to derive instantaneous flick velocity (DragGesture.velocity is iOS 17+).
+    @State private var pendingTap: DispatchWorkItem?
+    @State private var lastDragSample: (time: Date, tx: CGFloat, ty: CGFloat)?
+    @State private var dragVelocity: CGSize = .zero
 
     private var title: String { comicURL.deletingPathExtension().lastPathComponent.uppercased() }
     private var camera: Panel {
@@ -246,7 +259,12 @@ struct ReaderView: View {
                 }
             }
             .contentShape(Rectangle())
-            // Pinch to zoom; drag to pan when zoomed, or swipe to turn the page when not.
+            // Unified pointer handling ported from Android's ReaderScreen so the "zones" match: a
+            // single tap is deferred briefly so a second tap reads as a double-tap (recenter); pinch
+            // zooms; a one-finger drag pans when zoomed, or a fast horizontal *flick* (velocity, not
+            // distance) turns the whole page when viewing the full page — a slow drag just floats the
+            // comic and stays put. The minimumDistance:0 drag captures taps too, so tap + double-tap
+            // no longer fight each other the way the old SpatialTapGesture + count-2 tap did.
             .gesture(
                 SimultaneousGesture(
                     MagnificationGesture()
@@ -254,36 +272,37 @@ struct ReaderView: View {
                         .onEnded { _ in
                             if zoom <= 1.01 { resetZoom() } else { steadyZoom = zoom }
                         },
-                    DragGesture(minimumDistance: 14)
+                    DragGesture(minimumDistance: 0)
                         .onChanged { value in
+                            trackVelocity(value)
                             guard zoom > 1.01 else { return }
                             pan = CGSize(width: steadyPan.width + value.translation.width,
                                          height: steadyPan.height + value.translation.height)
                         }
                         .onEnded { value in
-                            if zoom > 1.01 { steadyPan = pan; return }
-                            let dx = value.translation.width
-                            guard abs(dx) > 50, abs(dx) > abs(value.translation.height) else { return }
+                            defer { lastDragSample = nil }
+                            let t = value.translation
+                            let moved = (t.width * t.width + t.height * t.height) > Self.tapSlop * Self.tapSlop
+                            if zoom > 1.01 {
+                                if moved { steadyPan = pan }
+                                else { handleTap(value.location.x, width: geo.size.width, in: loader) }
+                                return
+                            }
+                            guard moved else {
+                                handleTap(value.location.x, width: geo.size.width, in: loader)
+                                return
+                            }
+                            // A flick turns the page only from the full-page view (Android's isFullPage
+                            // gate); on a framed panel you step with taps. Velocity separates a
+                            // deliberate flick from a slow reposition.
+                            guard step == -1 else { return }
+                            let vx = dragVelocity.width, vy = dragVelocity.height
+                            guard abs(vx) > Self.flickVelocityPxS,
+                                  abs(vx) > abs(vy) * Self.swipeHorizontalBias else { return }
                             // swipe-left advances in LTR (and is mirrored under RTL)
-                            turnPage(next: (dx < 0) != rightToLeft, in: loader)
+                            turnPage(next: (vx < 0) != rightToLeft, in: loader)
                         }
                 )
-            )
-            .gesture(
-                SpatialTapGesture().onEnded { value in
-                    guard zoom <= 1.01 else { withAnimation { showChrome.toggle() }; return }
-                    let x = value.location.x
-                    if x > geo.size.width * 0.66 { advance(by: 1, in: loader) }
-                    else if x < geo.size.width * 0.33 { advance(by: -1, in: loader) }
-                    else { withAnimation { showChrome.toggle() } }
-                }
-            )
-            .highPriorityGesture(
-                TapGesture(count: 2).onEnded {
-                    withAnimation(.spring(response: 0.35)) {
-                        if zoom > 1.01 { resetZoom() } else { zoom = 2.5; steadyZoom = 2.5 }
-                    }
-                }
             )
         }
         .overlay(alignment: .top) { if showChrome { topBar } }
@@ -375,6 +394,40 @@ struct ReaderView: View {
     }
 
     /// Steps through panels, rolling over to the next/previous page at the ends.
+    // Tap-zone + double-tap disambiguation, matching Android's deferred tap. Left third steps back,
+    // right third steps forward (panels are pre-ordered in reading direction, so this is RTL-agnostic
+    // exactly like Android), middle third toggles chrome. A second tap inside the window cancels the
+    // pending step and recenters the view instead of navigating.
+    private func handleTap(_ x: CGFloat, width: CGFloat, in loader: PageLoader) {
+        if let pending = pendingTap {
+            pending.cancel()
+            pendingTap = nil
+            withAnimation(.spring(response: 0.35)) { resetZoom() }
+            return
+        }
+        let work = DispatchWorkItem {
+            self.pendingTap = nil
+            if x < width / 3 { self.advance(by: -1, in: loader) }
+            else if x > width * 2 / 3 { self.advance(by: 1, in: loader) }
+            else { withAnimation { self.showChrome.toggle() } }
+        }
+        pendingTap = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.doubleTapWindow, execute: work)
+    }
+
+    // Instantaneous drag velocity (px/s) from successive samples. DragGesture.velocity is iOS 17+ and
+    // the app targets iOS 16, so we derive it from the per-event value.time deltas.
+    private func trackVelocity(_ value: DragGesture.Value) {
+        if let last = lastDragSample {
+            let dt = CGFloat(value.time.timeIntervalSince(last.time))
+            if dt > 0 {
+                dragVelocity = CGSize(width: (value.translation.width - last.tx) / dt,
+                                      height: (value.translation.height - last.ty) / dt)
+            }
+        }
+        lastDragSample = (value.time, value.translation.width, value.translation.height)
+    }
+
     private func advance(by delta: Int, in loader: PageLoader) {
         let next = step + delta
         if next >= regions.count {
