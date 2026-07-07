@@ -264,7 +264,10 @@ struct ReaderView: View {
                     .opacity(pageAlpha)
             }
         }
-        .frame(width: size.width, height: size.height)
+        // topLeading alignment is load-bearing: the bitmap-sized Image makes the ZStack oversized,
+        // and a default (.center) frame alignment would shift the image's local origin — the
+        // CameraFraming transform assumes local (0,0) sits at the container's top-left corner.
+        .frame(width: size.width, height: size.height, alignment: .topLeading)
         .clipped()
         .overlay { if image == nil { ProgressView().tint(Chika.ochre) } }
         // Reticle framing brackets — always drawn while reading (independent of chrome), crimson.
