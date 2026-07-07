@@ -55,7 +55,21 @@ object PanelPlanner {
         /** On a spread, a panel at least this wide (≈ one page-half) is "full width of its own page",
          *  so a big per-page panel on a wide spread is broken into more parts instead of left whole. */
         val spreadPageWidthFraction: Float = 0.42f,
-    )
+    ) {
+        companion object {
+            /**
+             * Manga profile: manga is paced panel-by-panel — small reaction/dialogue beats are
+             * narratively distinct, and the reader wants to land on each rather than have a strip of
+             * them merged into one zoom. So only *truly tiny* panels merge, and at most two at a time
+             * (vs. the Western-comic default that fuses runs of up to three ~10%-of-page panels).
+             * Division of oversized/spread panels is unchanged — a wide panel on a phone still splits.
+             */
+            val MANGA = Config(
+                smallAreaFraction = 0.05f,
+                maxMergeCount = 2,
+            )
+        }
+    }
 
     private data class Region(val panel: Panel, val merged: Boolean)
 
