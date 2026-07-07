@@ -103,7 +103,7 @@ private struct SectionLabel: View {
     init(_ text: String) { self.text = text }
     var body: some View {
         Text(text.uppercased())
-            .font(.archivo(9)).tracking(2.5).foregroundColor(Chika.ochre)
+            .font(.archivo(9, weight: 800)).tracking(2.5).foregroundColor(Chika.ochre)
     }
 }
 
@@ -117,9 +117,9 @@ private struct ToggleRow: View {
     var body: some View {
         HStack(alignment: .center, spacing: 12) {
             VStack(alignment: .leading, spacing: 2) {
-                Text(title).font(.archivo(14)).foregroundColor(Chika.cream)
+                Text(title).font(.archivo(14, weight: 700)).foregroundColor(Chika.cream)
                 Text(subtitle)
-                    .font(.archivo(10.5)).lineSpacing(3).foregroundColor(Chika.creamMuted)
+                    .font(.archivo(10.5, weight: 500)).lineSpacing(3).foregroundColor(Chika.creamMuted)
             }
             Spacer(minLength: 0)
             ChikaSwitch(isOn: $isOn)

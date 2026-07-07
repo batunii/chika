@@ -284,7 +284,7 @@ struct ReaderView: View {
                     .clipShape(Circle())
             }
             VStack(alignment: .leading, spacing: 2) {
-                Text(title).font(.archivo(14)).foregroundColor(Chika.cream).lineLimit(1)
+                Text(title).font(.archivo(14, weight: 800)).foregroundColor(Chika.cream).lineLimit(1)
                 Text(pageStatus).font(.archivo(9)).tracking(1.4).foregroundColor(Chika.creamMuted)
             }
             Spacer()
@@ -418,7 +418,7 @@ struct DirectionChip: View {
                 Image(systemName: "arrow.left.arrow.right")
                     .font(.system(size: 15, weight: .semibold)).foregroundColor(Chika.cream)
                 Text(rightToLeft ? "RTL" : "LTR")
-                    .font(.archivo(11)).tracking(1).foregroundColor(Chika.cream)
+                    .font(.archivo(11, weight: 700)).tracking(1).foregroundColor(Chika.cream)
             }
             .padding(.horizontal, 10).padding(.vertical, 6)
             .background(Chika.cream.opacity(0.12))

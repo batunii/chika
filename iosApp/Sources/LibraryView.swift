@@ -124,7 +124,7 @@ struct LibraryView: View {
                     VStack(alignment: .trailing, spacing: 1) {
                         Text("NEW COMICS OPEN").font(.archivo(7)).foregroundColor(Chika.creamMuted)
                         Text(defaultRTL ? "RTL" : "LTR")
-                            .font(.archivo(12)).foregroundColor(Chika.ink)
+                            .font(.archivo(12, weight: 700)).foregroundColor(Chika.ink)
                             .padding(.horizontal, 10).padding(.vertical, 4)
                             .background(Chika.ochre)
                             .clipShape(RoundedCornerShape(cornerRadius: 3))
@@ -212,7 +212,7 @@ struct ComicCard: View {
             .comicShadow(offset: 5, color: .black.opacity(0.70), corner: 4)
 
             Text(title)
-                .font(.archivo(12)).foregroundColor(Chika.cream)
+                .font(.archivo(12, weight: 800)).foregroundColor(Chika.cream)
                 .lineLimit(2).multilineTextAlignment(.leading)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.top, 9)
