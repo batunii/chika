@@ -63,51 +63,58 @@ struct ReaderView: View {
 
     private var isReady: Bool { if case .ready = state { return true }; return false }
 
+    // Actual size handed to the page Canvas, captured from the live layout. TEMP diagnostic state
+    // (remove with the overlay below once device framing is confirmed).
+    @State private var canvasBox: CGSize = .zero
+
     var body: some View {
-        // Single root GeometryReader that ignores the safe area → `screen.size` is the TRUE full
-        // screen anchored at (0,0), exactly what the offline sim/Android draw into. `safeAreaInsets`
-        // is still reported (the insets being ignored), so the chrome can clear the notch/home bar.
-        GeometryReader { screen in
-            ZStack {
-                settings.ground
-                switch state {
-                case .loading:
-                    ProgressView().tint(Chika.ochre)
-                case .failed(let message):
-                    VStack(spacing: 10) {
-                        Image(systemName: "exclamationmark.triangle").foregroundColor(Chika.ochre)
-                        Text(message).font(.archivo(14)).foregroundColor(Chika.cream)
-                            .multilineTextAlignment(.center)
-                    }
-                    .padding()
-                case .ready(let loader):
+        // Only the page canvas escapes the safe area (full-bleed, origin-0, like Android's
+        // full-window reader). The chrome stays in the normal safe-area layout, so SwiftUI itself
+        // keeps the top bar below the notch and the scrubber above the home indicator — no manual
+        // inset math. (An earlier version put .ignoresSafeArea() on a root GeometryReader and read
+        // proxy.safeAreaInsets for the chrome padding — but ignoring the safe area zeroes those
+        // insets, which shoved the title under the status bar and the slider under the home bar.)
+        ZStack {
+            settings.ground.ignoresSafeArea()
+            switch state {
+            case .loading:
+                ProgressView().tint(Chika.ochre)
+            case .failed(let message):
+                VStack(spacing: 10) {
+                    Image(systemName: "exclamationmark.triangle").foregroundColor(Chika.ochre)
+                    Text(message).font(.archivo(14)).foregroundColor(Chika.cream)
+                        .multilineTextAlignment(.center)
+                }
+                .padding()
+            case .ready(let loader):
+                GeometryReader { screen in
                     readerBody(loader, size: screen.size)
+                        .onAppear { canvasBox = screen.size }
+                        .onChange(of: screen.size) { canvasBox = $0 }
                 }
-            }
-            .frame(width: screen.size.width, height: screen.size.height)
-            .overlay(alignment: .top) {
-                if showChrome && isReady {
-                    topBar.padding(.top, screen.safeAreaInsets.top)
-                        .transition(.move(edge: .top).combined(with: .opacity))
-                }
-            }
-            .overlay(alignment: .bottom) {
-                if showChrome && isReady && pageCount > 1 {
-                    bottomBar.padding(.bottom, screen.safeAreaInsets.bottom)
-                        .transition(.move(edge: .bottom).combined(with: .opacity))
-                }
-            }
-            // TEMP diagnostic (remove once framing is confirmed): shows the actual drawing container
-            // size + safe-area insets on device, so we can verify it's truly full-screen.
-            .overlay(alignment: .topLeading) {
-                Text("box \(Int(screen.size.width))×\(Int(screen.size.height)) · ins \(Int(screen.safeAreaInsets.top))/\(Int(screen.safeAreaInsets.bottom))")
-                    .font(.system(size: 9, design: .monospaced))
-                    .foregroundColor(.green)
-                    .padding(3).background(Color.black.opacity(0.55))
-                    .padding(.top, screen.safeAreaInsets.top + 2).padding(.leading, 3)
+                .ignoresSafeArea()
             }
         }
-        .ignoresSafeArea()
+        .overlay(alignment: .top) {
+            if showChrome && isReady {
+                topBar.transition(.move(edge: .top).combined(with: .opacity))
+            }
+        }
+        .overlay(alignment: .bottom) {
+            if showChrome && isReady && pageCount > 1 {
+                bottomBar.transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+        }
+        // TEMP diagnostic (remove once device framing is confirmed): the size the Canvas really
+        // gets plus the live zoom/pan, so one device screenshot pins any remaining divergence.
+        .overlay(alignment: .topLeading) {
+            Text(String(format: "cvs %.0f×%.0f · z %.2f · p %.0f/%.0f",
+                        canvasBox.width, canvasBox.height, zoom, pan.width, pan.height))
+                .font(.system(size: 9, design: .monospaced))
+                .foregroundColor(.green)
+                .padding(3).background(Color.black.opacity(0.55))
+                .padding(.top, 2).padding(.leading, 3)
+        }
         .navigationBarHidden(true)
         .statusBarHidden(!showChrome)
         .task { load() }
@@ -317,8 +324,10 @@ struct ReaderView: View {
             }
         }
         .padding(.leading, 12).padding(.trailing, 6).padding(.top, 8).padding(.bottom, 18)
+        // The bar itself sits in the safe area; only its scrim bleeds up behind the status bar.
         .background(LinearGradient(colors: [Chika.ink.opacity(0.94), .clear],
-                                   startPoint: .top, endPoint: .bottom))
+                                   startPoint: .top, endPoint: .bottom)
+            .ignoresSafeArea(edges: .top))
     }
 
     private var bottomBar: some View {
@@ -343,8 +352,10 @@ struct ReaderView: View {
             .tint(Chika.ochre)
         }
         .padding(.horizontal, 20).padding(.top, 24).padding(.bottom, 12)
+        // The scrubber sits in the safe area; only its scrim bleeds down behind the home indicator.
         .background(LinearGradient(colors: [.clear, Chika.ink.opacity(0.97)],
-                                   startPoint: .top, endPoint: .bottom))
+                                   startPoint: .top, endPoint: .bottom)
+            .ignoresSafeArea(edges: .bottom))
         // Keep the scrubber in sync with programmatic page changes (taps/flicks) while not scrubbing.
         .onChange(of: page) { if !scrubbing { scrub = Double($0) } }
     }
