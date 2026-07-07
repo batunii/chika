@@ -38,6 +38,7 @@ enum ReadingPrefs {
 
 enum ReadingProgress {
     private static let key = "chika.progress.v1"
+    private static let openedKey = "chika.lastOpened.v1"
     private static let defaults = UserDefaults.standard
 
     private static func load() -> [String: Progress] {
@@ -65,5 +66,30 @@ enum ReadingProgress {
         var map = load()
         map.removeValue(forKey: url.lastPathComponent)
         save(map)
+        var opened = openedMap()
+        opened.removeValue(forKey: url.lastPathComponent)
+        saveOpened(opened)
+    }
+
+    // MARK: - Recency (most-recently-opened ordering, matching Android's `ORDER BY lastOpened DESC`)
+
+    /// Records that a comic was just opened/imported, so the library can order by recency.
+    static func markOpened(_ url: URL) {
+        var opened = openedMap()
+        opened[url.lastPathComponent] = Date().timeIntervalSince1970
+        saveOpened(opened)
+    }
+
+    /// Last-opened timestamp for a comic (0 if never opened) — the library sort key.
+    static func openedAt(_ url: URL) -> Double { openedMap()[url.lastPathComponent] ?? 0 }
+
+    private static func openedMap() -> [String: Double] {
+        guard let data = defaults.data(forKey: openedKey),
+              let map = try? JSONDecoder().decode([String: Double].self, from: data) else { return [:] }
+        return map
+    }
+
+    private static func saveOpened(_ map: [String: Double]) {
+        if let data = try? JSONEncoder().encode(map) { defaults.set(data, forKey: openedKey) }
     }
 }

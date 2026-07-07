@@ -6,31 +6,26 @@ import ImageIO
 /// page into memory — more reliable than UIImage(data:) + byPreparingThumbnail for big scans.
 enum CoverLoader {
     private static let cache = NSCache<NSURL, UIImage>()
+    private static let countCache = NSCache<NSURL, NSNumber>()
 
-    static func cover(for url: URL) async -> UIImage? {
-        if let cached = cache.object(forKey: url as NSURL) { return cached }
-        let image: UIImage? = await Task.detached(priority: .userInitiated) {
-            guard let archive = try? CbzArchive(url: url), archive.pageCount > 0,
-                  let data = try? archive.readPage(0) else { return nil }
-            return thumbnail(from: data, maxPixel: 600) ?? UIImage(data: data)
-        }.value
-        if let image { cache.setObject(image, forKey: url as NSURL) }
-        return image
-    }
+    /// Loads a comic's cover thumbnail (page 0) AND its page count in a single archive open, both
+    /// cached. Page count feeds the library's "N pages" label for unread comics (Android parity).
+    static func load(for url: URL) async -> (cover: UIImage?, pageCount: Int) {
+        let cachedCover = cache.object(forKey: url as NSURL)
+        let cachedCount = countCache.object(forKey: url as NSURL)?.intValue
+        if let cachedCover, let cachedCount { return (cachedCover, cachedCount) }
 
-    /// One-line diagnosis of why a cover failed: page count, page-0 byte size, the file's
-    /// magic-number header, and whether the image decoders accept it.
-    static func debugInfo(for url: URL) async -> String {
-        await Task.detached(priority: .utility) {
-            guard let archive = try? CbzArchive(url: url) else { return "open failed" }
+        let result: (UIImage?, Int) = await Task.detached(priority: .userInitiated) {
+            guard let archive = try? CbzArchive(url: url) else { return (nil, 0) }
             let n = archive.pageCount
-            guard n > 0 else { return "0 pages" }
-            guard let data = try? archive.readPage(0) else { return "\(n)p · read0 FAILED" }
-            let magic = data.prefix(4).map { String(format: "%02X", $0) }.joined()
-            let imageIO = CGImageSourceCreateWithData(data as CFData, nil) != nil
-            let uiImage = UIImage(data: data) != nil
-            return "\(n)p · pg0 \(data.count)B\n\(magic)\nIIO:\(imageIO) UI:\(uiImage)"
+            guard n > 0, let data = try? archive.readPage(0) else { return (nil, n) }
+            let img = thumbnail(from: data, maxPixel: 600) ?? UIImage(data: data)
+            return (img, n)
         }.value
+
+        if let img = result.0 { cache.setObject(img, forKey: url as NSURL) }
+        countCache.setObject(NSNumber(value: result.1), forKey: url as NSURL)
+        return result
     }
 
     private static func thumbnail(from data: Data, maxPixel: Int) -> UIImage? {

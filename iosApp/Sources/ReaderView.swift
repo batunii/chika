@@ -26,6 +26,9 @@ struct ReaderView: View {
     private static let flickVelocityPxS: CGFloat = 700  // Android FLICK_VELOCITY_PX_S
     private static let swipeHorizontalBias: CGFloat = 1.2 // Android SWIPE_HORIZONTAL_BIAS
     private static let tapSlop: CGFloat = 10            // movement under this counts as a tap, not a drag
+    // Sentinel restoreStep meaning "land on this page's whole-page outro" (used by backward turns);
+    // resolved to regions.count once the page's regions are known.
+    private static let outroSlot = Int.max
 
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var settings: ChikaSettings
@@ -42,15 +45,11 @@ struct ReaderView: View {
     // Detected panels cached per page (in the current reading direction) so back/forward and
     // prefetched pages don't re-run the detector. Cleared when the direction changes.
     @State private var panelCache: [Int: [Panel]] = [:]
-    // overlay all detected panels on the whole page; CHIKA_DEBUG_BOXES forces it on at launch (QA).
-    @State private var debugBoxes = ProcessInfo.processInfo.environment["CHIKA_DEBUG_BOXES"] != nil
     // Manual zoom/pan layered on top of the panel-framing camera (pinch to zoom, drag to pan).
     @State private var zoom: CGFloat = 1
     @State private var steadyZoom: CGFloat = 1
     @State private var pan: CGSize = .zero
     @State private var steadyPan: CGSize = .zero
-    // How tightly a panel fills the screen; user-cyclable for taste (display-only, no detect impact).
-    @State private var fill: Float = ReadingPrefs.zoomFill
     // Pending deferred single tap (cancelled by a second tap → double-tap recenter), and the last
     // drag sample used to derive instantaneous flick velocity (DragGesture.velocity is iOS 17+).
     @State private var pendingTap: DispatchWorkItem?
@@ -58,10 +57,13 @@ struct ReaderView: View {
     @State private var dragVelocity: CGSize = .zero
 
     private var title: String { comicURL.deletingPathExtension().lastPathComponent.uppercased() }
+    // Slot model matching Android: step -1 = whole-page intro, 0…n-1 = panels, n = whole-page outro.
+    // The intro and outro both frame the whole page, so page turns always land zoomed-out.
     private var camera: Panel {
-        if debugBoxes { return Panel.companion.FULL_PAGE } // show the full page to overlay all boxes
-        return (step >= 0 && step < regions.count) ? regions[step] : Panel.companion.FULL_PAGE
+        (step >= 0 && step < regions.count) ? regions[step] : Panel.companion.FULL_PAGE
     }
+    // Whether the current slot is a framed panel (vs. the whole-page intro/outro).
+    private var onPanel: Bool { step >= 0 && step < regions.count }
 
     var body: some View {
         ZStack {
@@ -104,6 +106,7 @@ struct ReaderView: View {
                 page = min(max(pi, 0), pageCount - 1)
             }
             state = .ready(loader)
+            ReadingProgress.markOpened(comicURL)   // bump recency so it sorts to the top of the library
             // QA hook: start on a specific panel index (never set in production).
             var restore = ReadingProgress.get(comicURL)?.step ?? -1
             if let s = ProcessInfo.processInfo.environment["CHIKA_DEBUG_STEP"], let si = Int(s) { restore = si }
@@ -118,8 +121,10 @@ struct ReaderView: View {
     /// the watchdog. A serial queue avoids concurrent ZIP reads (ZIPFoundation isn't thread-safe),
     /// and a token ensures only the latest page renders when scrubbing fast.
     private func loadPage(_ loader: PageLoader, restoreStep: Int = -1) {
-        step = restoreStep
         regions = panelCache[page] ?? [Panel.companion.FULL_PAGE]
+        // Resolve the outro sentinel now that this page's regions are known (backward page turns
+        // land on the whole-page outro, matching Android).
+        step = (restoreStep == Self.outroSlot) ? regions.count : restoreStep
         resetZoom()
         persist()
 
@@ -133,7 +138,8 @@ struct ReaderView: View {
                 self.image = img
                 if let cached = self.panelCache[target] {
                     self.regions = cached
-                    if self.step >= cached.count { self.step = cached.count - 1 }
+                    // Keep intro (-1) / outro (count) as whole-page; clamp only strays past the outro.
+                    if self.step > cached.count { self.step = cached.count }
                 } else {
                     self.redetect()
                 }
@@ -173,12 +179,8 @@ struct ReaderView: View {
                 self.panelCache[forPage] = found
                 guard forPage == self.page else { return }
                 self.regions = found
-                if self.step >= found.count { self.step = found.count - 1 } // keep a restored panel in range
+                if self.step > found.count { self.step = found.count } // keep intro/outro/panel in range
                 self.detecting = false
-                // QA hook: auto-split the current region once, to demonstrate the manual split.
-                if ProcessInfo.processInfo.environment["CHIKA_DEBUG_SPLIT"] != nil, self.step >= 0 {
-                    self.splitCurrentRegion()
-                }
             }
         }
     }
@@ -210,8 +212,8 @@ struct ReaderView: View {
                         bitmapH: Int32(image.cgImage?.height ?? 1),
                         containerW: Float(geo.size.width),
                         containerH: Float(geo.size.height),
-                        // Default 0.98 matches Android; user can cycle this in the reader for taste.
-                        fill: fill
+                        // Fixed 0.98 contain-fill, matching Android (no user fill cycling).
+                        fill: 0.98
                     )
                     Image(uiImage: image)
                         .resizable()
@@ -229,35 +231,6 @@ struct ReaderView: View {
             .frame(width: geo.size.width, height: geo.size.height)
             .clipped()
             .overlay { if showChrome { Reticle(color: Chika.cream, inset: 6) } }
-            .overlay {
-                // Debug: draw every planned panel box (in reading order) over the whole page, so a
-                // screenshot can be compared to Android to confirm detection parity.
-                if debugBoxes, let image {
-                    Canvas { ctx, sz in
-                        let d = CameraTransformKt.computePageDraw(
-                            camera: Panel.companion.FULL_PAGE,
-                            bitmapW: Int32(image.cgImage?.width ?? 1),
-                            bitmapH: Int32(image.cgImage?.height ?? 1),
-                            containerW: Float(sz.width), containerH: Float(sz.height), fill: 0.98)
-                        let ox = CGFloat(d.left), oy = CGFloat(d.top)
-                        let sw = CGFloat(d.scaledWidth), sh = CGFloat(d.scaledHeight)
-                        for (i, r) in regions.enumerated() {
-                            let rect = CGRect(x: ox + CGFloat(r.left) * sw, y: oy + CGFloat(r.top) * sh,
-                                              width: CGFloat(r.width) * sw, height: CGFloat(r.height) * sh)
-                            ctx.stroke(Path(rect), with: .color(.red), lineWidth: 2)
-                            ctx.draw(Text("\(i + 1)").font(.system(size: 15, weight: .black)).foregroundColor(.yellow),
-                                     at: CGPoint(x: rect.minX + 12, y: rect.minY + 12))
-                        }
-                        // Diagnostic readout: overlap score + panel count (for tuning the reliability gate).
-                        let ovl = PanelReliability.shared.overlapScore(panels: regions)
-                        let reliable = PanelReliability.shared.isReliable(panels: regions)
-                        ctx.draw(Text(String(format: "ovl=%.3f n=%d %@", ovl, regions.count, reliable ? "OK" : "FALLBACK"))
-                            .font(.system(size: 16, weight: .black)).foregroundColor(.green),
-                                 at: CGPoint(x: sz.width / 2, y: 24))
-                    }
-                    .allowsHitTesting(false)
-                }
-            }
             .contentShape(Rectangle())
             // Unified pointer handling ported from Android's ReaderScreen so the "zones" match: a
             // single tap is deferred briefly so a second tap reads as a double-tap (recenter); pinch
@@ -309,6 +282,14 @@ struct ReaderView: View {
         .overlay(alignment: .bottom) { if showChrome { bottomBar } }
     }
 
+    // Top-bar status line, matching Android: "Page X/Y · panel N/M" / "· full page" / "· detecting…".
+    private var pageStatus: String {
+        let prefix = "Page \(page + 1)/\(pageCount) · "
+        if detecting { return prefix + "detecting…" }
+        if onPanel { return prefix + "panel \(step + 1)/\(regions.count)" }
+        return prefix + "full page"
+    }
+
     private var topBar: some View {
         HStack(alignment: .center, spacing: 12) {
             Button { dismiss() } label: {
@@ -321,31 +302,19 @@ struct ReaderView: View {
             }
             VStack(alignment: .leading, spacing: 1) {
                 Text(title).font(.anton(15)).foregroundColor(Chika.cream).lineLimit(1)
-                HStack(spacing: 6) {
-                    // "Whole page" signals the detection-confidence fallback (auto-pan off here).
-                    KickerText(detecting ? "Detecting…" : (regions.count <= 1 ? "Whole page" : "Reading"), size: 8)
-                }
+                KickerText(pageStatus, size: 8)
             }
             Spacer()
-            // Manual split: halve the current region when the detector merged multiple panels.
-            Button { withAnimation(.spring(response: 0.4)) { splitCurrentRegion() } } label: {
-                Image(systemName: "rectangle.split.2x1")
+            // Show whole page (Android's ZoomOutMap): jump back to the whole-page view from a panel.
+            Button { withAnimation(.spring(response: 0.4)) { showWholePage() } } label: {
+                Image(systemName: "arrow.down.right.and.arrow.up.left")
                     .font(.system(size: 15, weight: .bold))
-                    .foregroundColor(step >= 0 ? Chika.cream : Chika.creamMuted)
+                    .foregroundColor(onPanel ? Chika.cream : Chika.creamMuted)
                     .frame(width: 34, height: 34)
                     .background(Chika.inkSoft)
                     .clipShape(RoundedCornerShape(cornerRadius: 3))
             }
-            .disabled(step < 0)
-            // Developer panel-box overlay toggle (kept visible for now at user request).
-            Button { debugBoxes.toggle() } label: {
-                Image(systemName: debugBoxes ? "square.dashed.inset.filled" : "square.dashed")
-                    .font(.system(size: 15, weight: .bold))
-                    .foregroundColor(debugBoxes ? Chika.ochre : Chika.cream)
-                    .frame(width: 34, height: 34)
-                    .background(Chika.inkSoft)
-                    .clipShape(RoundedCornerShape(cornerRadius: 3))
-            }
+            .disabled(!onPanel)
             Button(rightToLeft ? "RTL" : "LTR") {
                 rightToLeft.toggle()
                 panelCache.removeAll() // panels are ordered per-direction; re-detect under the new one
@@ -363,7 +332,7 @@ struct ReaderView: View {
     private var bottomBar: some View {
         HStack(alignment: .bottom) {
             VStack(alignment: .leading, spacing: 2) {
-                KickerText(step < 0 ? "Tap right to step" : "Tap to step · swipe to turn", size: 8)
+                KickerText("Swipe to turn", size: 8)
                 Slider(
                     value: Binding(
                         get: { Double(page) },
@@ -375,19 +344,6 @@ struct ReaderView: View {
                 .frame(width: 180)
             }
             Spacer()
-            // Cycle how tightly panels fill the screen (more padding ↔ edge-to-edge).
-            Button { cycleFill() } label: {
-                VStack(spacing: 1) {
-                    Image(systemName: "arrow.up.left.and.arrow.down.right")
-                        .font(.system(size: 12, weight: .bold))
-                    Text("\(Int((fill * 100).rounded()))").font(.archivo(9))
-                }
-                .foregroundColor(Chika.cream)
-                .frame(width: 38, height: 38)
-                .background(Chika.inkSoft)
-                .clipShape(RoundedCornerShape(cornerRadius: 3))
-            }
-            .padding(.trailing, 8)
             PageCoin(page: page + 1, total: pageCount)
         }
         .padding(.horizontal, 16).padding(.bottom, 12)
@@ -430,51 +386,23 @@ struct ReaderView: View {
 
     private func advance(by delta: Int, in loader: PageLoader) {
         let next = step + delta
-        if next >= regions.count {
+        if next > regions.count {                       // past the whole-page outro → next page intro
             guard page + 1 < loader.pageCount else { return }
-            page += 1; loadPage(loader)
-        } else if next < -1 {
+            page += 1; loadPage(loader, restoreStep: -1)
+        } else if next < -1 {                            // before the whole-page intro → prev page outro
             guard page > 0 else { return }
-            page -= 1; loadPage(loader)
+            page -= 1; loadPage(loader, restoreStep: Self.outroSlot)
         } else {
-            step = next
+            step = next                                  // -1 intro · 0…n-1 panels · n outro
             resetZoom()
             persist()
         }
     }
 
-    /// Splits the current framed region in half along its longer screen axis (RTL-aware) — a manual
-    /// workaround for when the detector merges several real panels into one box. The override is
-    /// cached per page so it survives navigation within this comic (session-only, not persisted).
-    private func splitCurrentRegion() {
-        guard step >= 0, step < regions.count, let cg = image?.cgImage else { return }
-        let r = regions[step]
-        let realW = Double(r.width) * Double(cg.width)
-        let realH = Double(r.height) * Double(cg.height)
-        let halves: [Panel]
-        if realW >= realH {
-            let midX = (r.left + r.right) / 2
-            let left = Panel(left: r.left, top: r.top, right: midX, bottom: r.bottom)
-            let right = Panel(left: midX, top: r.top, right: r.right, bottom: r.bottom)
-            halves = rightToLeft ? [right, left] : [left, right]   // reading-first half stays at `step`
-        } else {
-            let midY = (r.top + r.bottom) / 2
-            halves = [Panel(left: r.left, top: r.top, right: r.right, bottom: midY),
-                      Panel(left: r.left, top: midY, right: r.right, bottom: r.bottom)]
-        }
-        var updated = regions
-        updated.replaceSubrange(step...step, with: halves)
-        regions = updated
-        panelCache[page] = updated   // keep the override when returning to this page
+    /// Jumps to the whole-page view (Android's "show whole page" / ZoomOutMap), resetting any zoom.
+    private func showWholePage() {
+        step = -1
         resetZoom()
         persist()
-    }
-
-    /// Cycles how tightly panels fill the screen (more padding ↔ edge-to-edge), persisted globally.
-    private func cycleFill() {
-        let levels = ReadingPrefs.fillLevels
-        let idx = levels.firstIndex(where: { abs($0 - fill) < 0.001 }) ?? levels.count - 1
-        fill = levels[(idx + 1) % levels.count]
-        ReadingPrefs.zoomFill = fill
     }
 }

@@ -8,6 +8,8 @@ struct LibraryView: View {
     @StateObject private var library = LibraryStore()
     @State private var showPicker = false
     @State private var showMenu = false
+    // Comic awaiting delete confirmation (Android shows a "Remove comic?" dialog before deleting).
+    @State private var pendingDelete: URL?
     // Resume snapshot keyed by filename, refreshed on appear and when returning from the reader so
     // cards show fresh progress without resetting scroll position.
     @State private var progress: [String: Progress] = [:]
@@ -69,7 +71,20 @@ struct LibraryView: View {
             } message: {
                 Text(library.importError ?? "")
             }
-            .onAppear { reloadProgress(); autoOpenIfDebug() }
+            .alert("Remove comic?", isPresented: Binding(
+                get: { pendingDelete != nil },
+                set: { if !$0 { pendingDelete = nil } }
+            )) {
+                Button("Cancel", role: .cancel) { pendingDelete = nil }
+                Button("Delete", role: .destructive) {
+                    if let url = pendingDelete { library.delete(url) }
+                    pendingDelete = nil
+                }
+            } message: {
+                Text("This removes the imported copy. The original file is untouched.")
+            }
+            // refresh() re-sorts by recency so a just-read comic jumps to the top (Android parity).
+            .onAppear { library.refresh(); reloadProgress(); autoOpenIfDebug() }
         }
     }
 
@@ -144,11 +159,11 @@ struct LibraryView: View {
             LazyVGrid(columns: columns, spacing: 16) {
                 ForEach(library.comics, id: \.self) { url in
                     NavigationLink(value: url) {
-                        ComicCard(url: url, issue: issueNumber(url), progress: progress[url.lastPathComponent] ?? nil)
+                        ComicCard(url: url, progress: progress[url.lastPathComponent] ?? nil)
                     }
                     .buttonStyle(.plain)
                     .contextMenu {
-                        Button(role: .destructive) { library.delete(url) } label: {
+                        Button(role: .destructive) { pendingDelete = url } label: {
                             Label("Remove", systemImage: "trash")
                         }
                     }
@@ -164,38 +179,20 @@ struct LibraryView: View {
             Spacer()
             ChikaMark(size: 72)
             Text("NO COMICS YET").font(.anton(22)).foregroundColor(Chika.cream)
-            KickerText("Tap + to import a CBZ/CBR from Files")
-            // Diagnostic: shows what the app actually sees on disk, so an import-vs-render issue is
-            // visible. Tap the storage line to re-scan.
-            Text(library.storageReport)
-                .font(.system(size: 10, design: .monospaced))
-                .foregroundColor(Chika.creamMuted)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, 24)
-                .onTapGesture { library.refresh() }
+            KickerText("Tap + to add a CBZ or CBR")
             Spacer()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
-
-    /// Best-effort issue label from the filename (e.g. "...01" → "01"), else a stable index.
-    private func issueNumber(_ url: URL) -> String {
-        let name = url.deletingPathExtension().lastPathComponent
-        let digits = name.suffix(while: { $0.isNumber })
-        if !digits.isEmpty { return String(digits.suffix(2)) }
-        let idx = (library.comics.firstIndex(of: url) ?? 0) + 1
-        return String(format: "%02d", idx)
-    }
 }
 
 /// A single comic in the grid: cover (or maroon halftone placeholder) under a hard comic shadow,
-/// an ISSUE tag top-left, and the title in Anton across the bottom — the Android card styling.
+/// with the title in Anton across the bottom — the Android card styling.
 struct ComicCard: View {
     let url: URL
-    let issue: String
     let progress: Progress?
     @State private var cover: UIImage?
-    @State private var coverDebug = "…"
+    @State private var pages = 0
 
     private var title: String { url.deletingPathExtension().lastPathComponent.uppercased() }
 
@@ -209,12 +206,6 @@ struct ComicCard: View {
                         ZStack {
                             Chika.maroon
                             Halftone(color: Chika.ink, alpha: 0.18)
-                            // Diagnostic (shown only until covers work): why page-0 didn't render.
-                            Text(coverDebug)
-                                .font(.system(size: 9, design: .monospaced))
-                                .foregroundColor(Chika.cream.opacity(0.9))
-                                .multilineTextAlignment(.center)
-                                .padding(6)
                         }
                     }
                 }
@@ -227,10 +218,6 @@ struct ComicCard: View {
                 Text(title)
                     .font(.anton(20)).foregroundColor(Chika.cream).lineLimit(2)
                     .padding(12)
-
-                KickerText("Issue \(issue)", size: 8, color: Chika.creamMuted)
-                    .padding(10)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             }
             .frame(height: 220)
             .clipShape(RoundedCornerShape(cornerRadius: 4))
@@ -240,8 +227,9 @@ struct ComicCard: View {
             progressFooter
         }
         .task {
-            cover = await CoverLoader.cover(for: url)
-            if cover == nil { coverDebug = await CoverLoader.debugInfo(for: url) }
+            let loaded = await CoverLoader.load(for: url)
+            cover = loaded.cover
+            pages = loaded.pageCount
         }
     }
 
@@ -261,7 +249,7 @@ struct ComicCard: View {
             }
             .padding(.horizontal, 2)
         } else {
-            KickerText("Unread", size: 7).padding(.horizontal, 2)
+            KickerText(pages > 0 ? "\(pages) pages" : "Unread", size: 7).padding(.horizontal, 2)
         }
     }
 }
@@ -271,12 +259,5 @@ struct RoundedCornerShape: Shape {
     var cornerRadius: CGFloat
     func path(in rect: CGRect) -> Path {
         Path(roundedRect: rect, cornerRadius: cornerRadius)
-    }
-}
-
-private extension StringProtocol {
-    /// Trailing run of characters matching a predicate (e.g. trailing digits of a filename).
-    func suffix(while predicate: (Character) -> Bool) -> String {
-        String(reversed().prefix(while: predicate).reversed())
     }
 }
