@@ -10,7 +10,10 @@ struct MenuView: View {
     private static let repoURL = URL(string: "https://github.com/batunii/chika")!
 
     private var version: String {
-        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "—"
+        let info = Bundle.main.infoDictionary
+        let short = info?["CFBundleShortVersionString"] as? String ?? "—"
+        let build = info?["CFBundleVersion"] as? String ?? "—"
+        return "\(short) (\(build))"
     }
 
     var body: some View {
