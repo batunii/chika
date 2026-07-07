@@ -64,32 +64,50 @@ struct ReaderView: View {
     private var isReady: Bool { if case .ready = state { return true }; return false }
 
     var body: some View {
-        ZStack {
-            settings.ground.ignoresSafeArea()
-            switch state {
-            case .loading:
-                ProgressView().tint(Chika.ochre)
-            case .failed(let message):
-                VStack(spacing: 10) {
-                    Image(systemName: "exclamationmark.triangle").foregroundColor(Chika.ochre)
-                    Text(message).font(.archivo(14)).foregroundColor(Chika.cream)
-                        .multilineTextAlignment(.center)
+        // Single root GeometryReader that ignores the safe area → `screen.size` is the TRUE full
+        // screen anchored at (0,0), exactly what the offline sim/Android draw into. `safeAreaInsets`
+        // is still reported (the insets being ignored), so the chrome can clear the notch/home bar.
+        GeometryReader { screen in
+            ZStack {
+                settings.ground
+                switch state {
+                case .loading:
+                    ProgressView().tint(Chika.ochre)
+                case .failed(let message):
+                    VStack(spacing: 10) {
+                        Image(systemName: "exclamationmark.triangle").foregroundColor(Chika.ochre)
+                        Text(message).font(.archivo(14)).foregroundColor(Chika.cream)
+                            .multilineTextAlignment(.center)
+                    }
+                    .padding()
+                case .ready(let loader):
+                    readerBody(loader, size: screen.size)
                 }
-                .padding()
-            case .ready(let loader):
-                readerBody(loader)
+            }
+            .frame(width: screen.size.width, height: screen.size.height)
+            .overlay(alignment: .top) {
+                if showChrome && isReady {
+                    topBar.padding(.top, screen.safeAreaInsets.top)
+                        .transition(.move(edge: .top).combined(with: .opacity))
+                }
+            }
+            .overlay(alignment: .bottom) {
+                if showChrome && isReady && pageCount > 1 {
+                    bottomBar.padding(.bottom, screen.safeAreaInsets.bottom)
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
+            }
+            // TEMP diagnostic (remove once framing is confirmed): shows the actual drawing container
+            // size + safe-area insets on device, so we can verify it's truly full-screen.
+            .overlay(alignment: .topLeading) {
+                Text("box \(Int(screen.size.width))×\(Int(screen.size.height)) · ins \(Int(screen.safeAreaInsets.top))/\(Int(screen.safeAreaInsets.bottom))")
+                    .font(.system(size: 9, design: .monospaced))
+                    .foregroundColor(.green)
+                    .padding(3).background(Color.black.opacity(0.55))
+                    .padding(.top, screen.safeAreaInsets.top + 2).padding(.leading, 3)
             }
         }
-        // Chrome overlays live here (not on the full-bleed page) so they respect the safe area —
-        // the top bar sits below the notch, the scrubber above the home indicator.
-        .overlay(alignment: .top) {
-            if showChrome && isReady { topBar.transition(.move(edge: .top).combined(with: .opacity)) }
-        }
-        .overlay(alignment: .bottom) {
-            if showChrome && isReady && pageCount > 1 {
-                bottomBar.transition(.move(edge: .bottom).combined(with: .opacity))
-            }
-        }
+        .ignoresSafeArea()
         .navigationBarHidden(true)
         .statusBarHidden(!showChrome)
         .task { load() }
@@ -212,58 +230,54 @@ struct ReaderView: View {
     }
 
     @ViewBuilder
-    private func readerBody(_ loader: PageLoader) -> some View {
-        GeometryReader { geo in
-            // Draw the page exactly where computePageDraw places it — a Canvas at the computed rect,
-            // like Android's Canvas (and the offline sim). The previous SwiftUI
-            // frame/offset/scaleEffect chain positioned the page differently on device (panels sat in
-            // a band with a black strip), so the framing math is now applied directly.
-            Canvas { ctx, size in
-                guard let image, let cg = image.cgImage else { return }
-                let draw = CameraTransformKt.computePageDraw(
-                    camera: camera,
-                    bitmapW: Int32(cg.width),
-                    bitmapH: Int32(cg.height),
-                    containerW: Float(size.width),
-                    containerH: Float(size.height),
-                    fill: 0.98
-                )
-                // Scale the framed page about the container centre, then apply manual zoom/pan.
-                let cx = size.width / 2, cy = size.height / 2
-                let left = cx + (CGFloat(draw.left) - cx) * zoom + pan.width
-                let top = cy + (CGFloat(draw.top) - cy) * zoom + pan.height
-                let w = CGFloat(draw.scaledWidth) * zoom
-                let h = CGFloat(draw.scaledHeight) * zoom
-                ctx.opacity = pageAlpha
-                let resolved = ctx.resolve(Image(uiImage: image))
-                ctx.draw(resolved, in: CGRect(x: left, y: top, width: w, height: h))
-            }
-            .frame(width: geo.size.width, height: geo.size.height)
-            .overlay { if image == nil { ProgressView().tint(Chika.ochre) } }
-            // Reticle framing brackets — always drawn while reading (independent of chrome), crimson.
-            .overlay { if image != nil {
-                Reticle(color: Chika.crimson.opacity(0.45), inset: 6, length: 16, stroke: 2).padding(6)
-            } }
-            // UIKit gesture layer: pinch to zoom (1×–5×), pan when zoomed, tap zones, double-tap to
-            // recenter, and a velocity flick to turn pages — all recognized simultaneously.
-            .overlay {
-                ReaderGestures(
-                    onTap: { location, size in tapZone(x: location.x, width: size.width, in: loader) },
-                    onDoubleTap: { withAnimation(.spring(response: 0.35)) { resetZoom() } },
-                    onPinchChanged: { scale in zoom = min(max(steadyZoom * scale, 1), 5) },
-                    onPinchEnded: { if zoom <= 1.01 { resetZoom() } else { steadyZoom = zoom } },
-                    onPanChanged: { t in
-                        // The comic floats over the background, clamped so it can't be lost off-screen.
-                        let raw = CGSize(width: steadyPan.width + t.width, height: steadyPan.height + t.height)
-                        pan = clampPan(raw, viewSize: geo.size)
-                    },
-                    onPanEnded: { _, velocity, maxTouches in
-                        endPan(velocity: velocity, maxTouches: maxTouches, in: loader)
-                    }
-                )
-            }
+    private func readerBody(_ loader: PageLoader, size: CGSize) -> some View {
+        // `size` is the true full screen (from the root GeometryReader that ignores the safe area),
+        // so the Canvas draws into the exact origin-0 full-screen container the sim/Android assume.
+        // Draw the page at computePageDraw's rect (like Android's Canvas), no SwiftUI frame chain.
+        Canvas { ctx, canvasSize in
+            guard let image, let cg = image.cgImage else { return }
+            let draw = CameraTransformKt.computePageDraw(
+                camera: camera,
+                bitmapW: Int32(cg.width),
+                bitmapH: Int32(cg.height),
+                containerW: Float(canvasSize.width),
+                containerH: Float(canvasSize.height),
+                fill: 0.98
+            )
+            // Scale the framed page about the container centre, then apply manual zoom/pan.
+            let cx = canvasSize.width / 2, cy = canvasSize.height / 2
+            let left = cx + (CGFloat(draw.left) - cx) * zoom + pan.width
+            let top = cy + (CGFloat(draw.top) - cy) * zoom + pan.height
+            let w = CGFloat(draw.scaledWidth) * zoom
+            let h = CGFloat(draw.scaledHeight) * zoom
+            ctx.opacity = pageAlpha
+            let resolved = ctx.resolve(Image(uiImage: image))
+            ctx.draw(resolved, in: CGRect(x: left, y: top, width: w, height: h))
         }
-        .ignoresSafeArea()   // full-bleed: the page fills the whole screen, chrome floats on top
+        .frame(width: size.width, height: size.height)
+        .overlay { if image == nil { ProgressView().tint(Chika.ochre) } }
+        // Reticle framing brackets — always drawn while reading (independent of chrome), crimson.
+        .overlay { if image != nil {
+            Reticle(color: Chika.crimson.opacity(0.45), inset: 6, length: 16, stroke: 2).padding(6)
+        } }
+        // UIKit gesture layer: pinch to zoom (1×–5×), pan when zoomed, tap zones, double-tap to
+        // recenter, and a velocity flick to turn pages — all recognized simultaneously.
+        .overlay {
+            ReaderGestures(
+                onTap: { location, sz in tapZone(x: location.x, width: sz.width, in: loader) },
+                onDoubleTap: { withAnimation(.spring(response: 0.35)) { resetZoom() } },
+                onPinchChanged: { scale in zoom = min(max(steadyZoom * scale, 1), 5) },
+                onPinchEnded: { if zoom <= 1.01 { resetZoom() } else { steadyZoom = zoom } },
+                onPanChanged: { t in
+                    // The comic floats over the background, clamped so it can't be lost off-screen.
+                    let raw = CGSize(width: steadyPan.width + t.width, height: steadyPan.height + t.height)
+                    pan = clampPan(raw, viewSize: size)
+                },
+                onPanEnded: { _, velocity, maxTouches in
+                    endPan(velocity: velocity, maxTouches: maxTouches, in: loader)
+                }
+            )
+        }
     }
 
     // Top-bar status line, matching Android: "Page X/Y · panel N/M" / "· full page" / "· detecting…".
