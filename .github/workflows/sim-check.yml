@@ -43,7 +43,8 @@ jobs:
       - name: Build app (simulator)
         run: |
           xcodebuild -workspace iosApp/Chika.xcworkspace -scheme Chika -configuration Debug \
-            -sdk iphonesimulator -derivedDataPath iosApp/build \
+            -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath iosApp/build ARCHS=arm64 \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build
 
       - name: Create and boot simulator
