@@ -1,5 +1,11 @@
 import SwiftUI
 
+/// Identifiable wrapper so the reader can be presented via `.fullScreenCover(item:)`.
+private struct OpenComic: Identifiable {
+    let url: URL
+    var id: String { url.absoluteString }
+}
+
 /// The Chika library — pulp-comic identity matching the Android design: ink ground with a halftone
 /// wash, the three-panel mark + CHI·KA wordmark, an ochre "YOUR LIBRARY" badge, and a two-column
 /// grid of comic cards with issue tags and Anton titles.
@@ -13,8 +19,10 @@ struct LibraryView: View {
     // Resume snapshot keyed by filename, refreshed on appear and when returning from the reader so
     // cards show fresh progress without resetting scroll position.
     @State private var progress: [String: Progress] = [:]
-    // Programmatic navigation, also driven by the QA auto-open hook below.
-    @State private var path = NavigationPath()
+    // The comic being read, presented as a full-screen cover (Android's reader is an immersive
+    // full-window activity; a fullScreenCover is the iOS equivalent, unlike a NavigationStack push
+    // which reserves a nav/safe-area inset that mis-frames the page).
+    @State private var openComic: OpenComic?
     // Global default reading direction for comics not yet opened (the global half of the
     // per-comic + default behaviour). Mirrors ReadingPrefs so the pill redraws on toggle.
     @State private var defaultRTL = ReadingPrefs.defaultRightToLeft
@@ -22,7 +30,7 @@ struct LibraryView: View {
     private let columns = [GridItem(.flexible(), spacing: 16), GridItem(.flexible(), spacing: 16)]
 
     var body: some View {
-        NavigationStack(path: $path) {
+        NavigationStack {
             ZStack {
                 settings.ground.ignoresSafeArea()
                 Halftone(color: Chika.crimson, alpha: 0.05).ignoresSafeArea()
@@ -40,8 +48,10 @@ struct LibraryView: View {
                 }
             }
             .navigationBarHidden(true)
-            .navigationDestination(for: URL.self) { url in
-                ReaderView(comicURL: url).onDisappear { reloadProgress() }
+            .fullScreenCover(item: $openComic) { item in
+                ReaderView(comicURL: item.url)
+                    .environmentObject(settings)
+                    .onDisappear { reloadProgress() }
             }
             .fullScreenCover(isPresented: $showMenu) {
                 MenuView().environmentObject(settings)
@@ -82,15 +92,15 @@ struct LibraryView: View {
     }
 
     /// QA hook: when launched with the CHIKA_DEBUG_OPEN env var (an index or filename substring),
-    /// push straight into that comic's reader. Never set in production, so this is a no-op there.
+    /// open that comic's reader. Never set in production, so this is a no-op there.
     private func autoOpenIfDebug() {
-        guard path.isEmpty,
+        guard openComic == nil,
               let target = ProcessInfo.processInfo.environment["CHIKA_DEBUG_OPEN"],
               !library.comics.isEmpty else { return }
         let match = Int(target).flatMap { library.comics.indices.contains($0) ? library.comics[$0] : nil }
             ?? library.comics.first { $0.lastPathComponent.localizedCaseInsensitiveContains(target) }
             ?? library.comics.first
-        if let match { path.append(match) }
+        if let match { openComic = OpenComic(url: match) }
     }
 
     private func reloadProgress() {
@@ -149,7 +159,7 @@ struct LibraryView: View {
             }
             LazyVGrid(columns: columns, spacing: 18) {
                 ForEach(library.comics, id: \.self) { url in
-                    NavigationLink(value: url) {
+                    Button { openComic = OpenComic(url: url) } label: {
                         ComicCard(url: url, progress: progress[url.lastPathComponent] ?? nil)
                     }
                     .buttonStyle(.plain)
