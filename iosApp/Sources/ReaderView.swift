@@ -26,6 +26,10 @@ struct ReaderView: View {
     // Sentinel restoreStep meaning "land on this page's whole-page outro" (used by backward turns);
     // resolved to regions.count once the page's regions are known.
     private static let outroSlot = Int.max
+    // Android's camera motion: tween(360, FastOutSlowInEasing) between framed views, and
+    // tween(240) for the double-tap recenter. FastOutSlowIn == cubic-bezier(0.4, 0, 0.2, 1).
+    private static let cameraTween = Animation.timingCurve(0.4, 0, 0.2, 1, duration: 0.36)
+    private static let recenterTween = Animation.timingCurve(0.4, 0, 0.2, 1, duration: 0.24)
 
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var settings: ChikaSettings
@@ -172,9 +176,11 @@ struct ReaderView: View {
                 self.image = img
                 withAnimation(.easeOut(duration: 0.28)) { self.pageAlpha = 1 }
                 if let cached = self.panelCache[target] {
-                    self.regions = cached
-                    // Keep intro (-1) / outro (count) as whole-page; clamp only strays past the outro.
-                    if self.step > cached.count { self.step = cached.count }
+                    withAnimation(Self.cameraTween) {   // land on the restored slot with the camera tween
+                        self.regions = cached
+                        // Keep intro (-1) / outro (count) as whole-page; clamp only strays past the outro.
+                        if self.step > cached.count { self.step = cached.count }
+                    }
                 } else {
                     self.redetect()
                 }
@@ -213,8 +219,10 @@ struct ReaderView: View {
             DispatchQueue.main.async {
                 self.panelCache[forPage] = found
                 guard forPage == self.page else { return }
-                self.regions = found
-                if self.step > found.count { self.step = found.count } // keep intro/outro/panel in range
+                withAnimation(Self.cameraTween) {   // glide into the framed panel when detection lands
+                    self.regions = found
+                    if self.step > found.count { self.step = found.count } // keep intro/outro/panel in range
+                }
                 self.detecting = false
             }
         }
@@ -238,30 +246,26 @@ struct ReaderView: View {
 
     @ViewBuilder
     private func readerBody(_ loader: PageLoader, size: CGSize) -> some View {
-        // `size` is the true full screen (from the root GeometryReader that ignores the safe area),
-        // so the Canvas draws into the exact origin-0 full-screen container the sim/Android assume.
-        // Draw the page at computePageDraw's rect (like Android's Canvas), no SwiftUI frame chain.
-        Canvas { ctx, canvasSize in
-            guard let image, let cg = image.cgImage else { return }
-            let draw = CameraTransformKt.computePageDraw(
-                camera: camera,
-                bitmapW: Int32(cg.width),
-                bitmapH: Int32(cg.height),
-                containerW: Float(canvasSize.width),
-                containerH: Float(canvasSize.height),
-                fill: 0.98
-            )
-            // Scale the framed page about the container centre, then apply manual zoom/pan.
-            let cx = canvasSize.width / 2, cy = canvasSize.height / 2
-            let left = cx + (CGFloat(draw.left) - cx) * zoom + pan.width
-            let top = cy + (CGFloat(draw.top) - cy) * zoom + pan.height
-            let w = CGFloat(draw.scaledWidth) * zoom
-            let h = CGFloat(draw.scaledHeight) * zoom
-            ctx.opacity = pageAlpha
-            let resolved = ctx.resolve(Image(uiImage: image))
-            ctx.draw(resolved, in: CGRect(x: left, y: top, width: w, height: h))
+        // `size` is the true full screen (from the GeometryReader that ignores the safe area), so
+        // the page is framed in the exact origin-0 full-screen container the sim/Android assume.
+        // The page is a plain Image carried by one animatable transform (CameraFraming) that runs
+        // the shared computePageDraw per frame — so stepping between panels TWEENS the camera the
+        // way Android's Animatable camera does (a Canvas can't animate; it jump-cuts).
+        ZStack(alignment: .topLeading) {
+            if let image, let cg = image.cgImage {
+                Image(uiImage: image)
+                    .resizable()
+                    .frame(width: CGFloat(cg.width), height: CGFloat(cg.height))
+                    .modifier(CameraFraming(
+                        camL: CGFloat(camera.left), camT: CGFloat(camera.top),
+                        camR: CGFloat(camera.right), camB: CGFloat(camera.bottom),
+                        zoom: zoom, panX: pan.width, panY: pan.height,
+                        container: size))
+                    .opacity(pageAlpha)
+            }
         }
         .frame(width: size.width, height: size.height)
+        .clipped()
         .overlay { if image == nil { ProgressView().tint(Chika.ochre) } }
         // Reticle framing brackets — always drawn while reading (independent of chrome), crimson.
         .overlay { if image != nil {
@@ -272,7 +276,7 @@ struct ReaderView: View {
         .overlay {
             ReaderGestures(
                 onTap: { location, sz in tapZone(x: location.x, width: sz.width, in: loader) },
-                onDoubleTap: { withAnimation(.spring(response: 0.35)) { resetZoom() } },
+                onDoubleTap: { withAnimation(Self.recenterTween) { resetZoom() } },
                 onPinchChanged: { scale in zoom = min(max(steadyZoom * scale, 1), 5) },
                 onPinchEnded: { if zoom <= 1.01 { resetZoom() } else { steadyZoom = zoom } },
                 onPanChanged: { t in
@@ -311,7 +315,7 @@ struct ReaderView: View {
             }
             Spacer()
             // Show whole page (Android's ZoomOutMap): plain icon, always enabled (no-op on full page).
-            Button { withAnimation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.36)) { showWholePage() } } label: {
+            Button { showWholePage() } label: {   // showWholePage runs its own camera tween
                 Image(systemName: "arrow.up.left.and.arrow.down.right")
                     .font(.system(size: 18, weight: .semibold))
                     .foregroundColor(Chika.cream)
@@ -418,17 +422,71 @@ struct ReaderView: View {
             guard page > 0 else { return }
             page -= 1; loadPage(loader, restoreStep: Self.outroSlot)
         } else {
-            step = next                                  // -1 intro · 0…n-1 panels · n outro
-            resetZoom()
+            withAnimation(Self.cameraTween) {            // tween the camera like Android (360ms)
+                step = next                              // -1 intro · 0…n-1 panels · n outro
+                resetZoom()
+            }
             persist()
         }
     }
 
     /// Jumps to the whole-page view (Android's "show whole page" / ZoomOutMap), resetting any zoom.
     private func showWholePage() {
-        step = -1
-        resetZoom()
+        withAnimation(Self.cameraTween) {
+            step = -1
+            resetZoom()
+        }
         persist()
+    }
+}
+
+/// Frames the page exactly like the shared computePageDraw (contain-fit the camera, fill 0.98),
+/// then layers the user's pinch zoom / pan about the container centre — all as ONE animatable
+/// transform. Because the camera rect itself is the animatable data, SwiftUI tweening it between
+/// panels reproduces Android's `Animatable(camera, PanelConverter)` motion: the framing math runs
+/// on every interpolated camera, not on interpolated screen rects.
+private struct CameraFraming: GeometryEffect {
+    var camL: CGFloat, camT: CGFloat, camR: CGFloat, camB: CGFloat
+    var zoom: CGFloat
+    var panX: CGFloat, panY: CGFloat
+    var container: CGSize
+
+    var animatableData: AnimatablePair<
+        AnimatablePair<AnimatablePair<CGFloat, CGFloat>, AnimatablePair<CGFloat, CGFloat>>,
+        AnimatablePair<CGFloat, AnimatablePair<CGFloat, CGFloat>>
+    > {
+        get {
+            AnimatablePair(
+                AnimatablePair(AnimatablePair(camL, camT), AnimatablePair(camR, camB)),
+                AnimatablePair(zoom, AnimatablePair(panX, panY)))
+        }
+        set {
+            camL = newValue.first.first.first
+            camT = newValue.first.first.second
+            camR = newValue.first.second.first
+            camB = newValue.first.second.second
+            zoom = newValue.second.first
+            panX = newValue.second.second.first
+            panY = newValue.second.second.second
+        }
+    }
+
+    // [size] is the Image's laid-out size: the page bitmap's pixel dimensions.
+    func effectValue(size: CGSize) -> ProjectionTransform {
+        let draw = CameraTransformKt.computePageDraw(
+            camera: Panel(left: Float(camL), top: Float(camT), right: Float(camR), bottom: Float(camB)),
+            bitmapW: Int32(max(size.width, 1)),
+            bitmapH: Int32(max(size.height, 1)),
+            containerW: Float(container.width),
+            containerH: Float(container.height),
+            fill: 0.98
+        )
+        let s = CGFloat(draw.scaledWidth) / max(size.width, 1)
+        let cx = container.width / 2, cy = container.height / 2
+        let left = cx + (CGFloat(draw.left) - cx) * zoom + panX
+        let top = cy + (CGFloat(draw.top) - cy) * zoom + panY
+        return ProjectionTransform(
+            CGAffineTransform(translationX: left, y: top).scaledBy(x: s * zoom, y: s * zoom))
     }
 }
 
