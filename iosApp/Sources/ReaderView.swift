@@ -47,8 +47,12 @@ struct ReaderView: View {
     @State private var steadyZoom: CGFloat = 1
     @State private var pan: CGSize = .zero
     @State private var steadyPan: CGSize = .zero
+    // Page scrubber state (commit on release, not per-tick) + per-page fade-in alpha.
+    @State private var scrub: Double = 0
+    @State private var scrubbing = false
+    @State private var pageAlpha: Double = 1
 
-    private var title: String { comicURL.deletingPathExtension().lastPathComponent.uppercased() }
+    private var title: String { comicURL.deletingPathExtension().lastPathComponent }
     // Slot model matching Android: step -1 = whole-page intro, 0…n-1 = panels, n = whole-page outro.
     // The intro and outro both frame the whole page, so page turns always land zoomed-out.
     private var camera: Panel {
@@ -119,6 +123,7 @@ struct ReaderView: View {
         step = (restoreStep == Self.outroSlot) ? regions.count : restoreStep
         resetZoom()
         persist()
+        pageAlpha = 0.35   // fades up to 1 once the page renders (Android's 280ms page fade-in)
 
         loadToken &+= 1
         let token = loadToken
@@ -128,6 +133,7 @@ struct ReaderView: View {
             DispatchQueue.main.async {
                 guard token == self.loadToken else { return } // a newer load superseded this one
                 self.image = img
+                withAnimation(.easeOut(duration: 0.28)) { self.pageAlpha = 1 }
                 if let cached = self.panelCache[target] {
                     self.regions = cached
                     // Keep intro (-1) / outro (count) as whole-page; clamp only strays past the outro.
@@ -214,15 +220,20 @@ struct ReaderView: View {
                         .frame(width: geo.size.width, height: geo.size.height, alignment: .topLeading)
                         .scaleEffect(zoom)
                         .offset(pan)
-                        .animation(.spring(response: 0.45, dampingFraction: 0.85), value: step)
-                        .animation(.spring(response: 0.45, dampingFraction: 0.85), value: page)
+                        .opacity(pageAlpha)
+                        // 360ms FastOutSlowIn camera move between panels/pages, matching Android.
+                        .animation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.36), value: step)
+                        .animation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.36), value: page)
                 } else {
                     ProgressView().tint(Chika.ochre)
                 }
             }
             .frame(width: geo.size.width, height: geo.size.height)
             .clipped()
-            .overlay { if showChrome { Reticle(color: Chika.cream, inset: 6) } }
+            // Reticle framing brackets — always drawn while reading (independent of chrome), crimson.
+            .overlay {
+                Reticle(color: Chika.crimson.opacity(0.45), inset: 6, length: 16, stroke: 2).padding(6)
+            }
             // UIKit gesture layer: pinch to zoom (1×–5×), pan when zoomed, tap zones, double-tap to
             // recenter, and a velocity flick to turn pages — all recognized simultaneously (SwiftUI's
             // gesture arbitration can't run a zero-distance tap-drag and a pinch together).
@@ -233,8 +244,10 @@ struct ReaderView: View {
                     onPinchChanged: { scale in zoom = min(max(steadyZoom * scale, 1), 5) },
                     onPinchEnded: { if zoom <= 1.01 { resetZoom() } else { steadyZoom = zoom } },
                     onPanChanged: { t in
-                        guard zoom > 1.01 else { return }        // pan only when zoomed in
-                        pan = CGSize(width: steadyPan.width + t.width, height: steadyPan.height + t.height)
+                        // The comic floats over the background, clamped so it can't be lost off-screen
+                        // (horizontal "cover", vertical float) — Android's clampPan behaviour.
+                        let raw = CGSize(width: steadyPan.width + t.width, height: steadyPan.height + t.height)
+                        pan = clampPan(raw, viewSize: geo.size)
                     },
                     onPanEnded: { _, velocity, maxTouches in
                         endPan(velocity: velocity, maxTouches: maxTouches, in: loader)
@@ -242,8 +255,14 @@ struct ReaderView: View {
                 )
             }
         }
-        .overlay(alignment: .top) { if showChrome { topBar } }
-        .overlay(alignment: .bottom) { if showChrome { bottomBar } }
+        .overlay(alignment: .top) {
+            if showChrome { topBar.transition(.move(edge: .top).combined(with: .opacity)) }
+        }
+        .overlay(alignment: .bottom) {
+            if showChrome && pageCount > 1 {
+                bottomBar.transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+        }
     }
 
     // Top-bar status line, matching Android: "Page X/Y · panel N/M" / "· full page" / "· detecting…".
@@ -257,60 +276,62 @@ struct ReaderView: View {
     private var topBar: some View {
         HStack(alignment: .center, spacing: 12) {
             Button { dismiss() } label: {
-                Image(systemName: "chevron.left")
+                Image(systemName: "arrow.left")
                     .font(.system(size: 16, weight: .bold))
                     .foregroundColor(Chika.cream)
-                    .frame(width: 34, height: 34)
-                    .background(Chika.inkSoft)
-                    .clipShape(RoundedCornerShape(cornerRadius: 3))
+                    .frame(width: 38, height: 38)
+                    .background(Chika.cream.opacity(0.12))
+                    .clipShape(Circle())
             }
-            VStack(alignment: .leading, spacing: 1) {
-                Text(title).font(.anton(15)).foregroundColor(Chika.cream).lineLimit(1)
-                KickerText(pageStatus, size: 8)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).font(.archivo(14)).foregroundColor(Chika.cream).lineLimit(1)
+                Text(pageStatus).font(.archivo(9)).tracking(1.4).foregroundColor(Chika.creamMuted)
             }
             Spacer()
-            // Show whole page (Android's ZoomOutMap): jump back to the whole-page view from a panel.
-            Button { withAnimation(.spring(response: 0.4)) { showWholePage() } } label: {
-                Image(systemName: "arrow.down.right.and.arrow.up.left")
-                    .font(.system(size: 15, weight: .bold))
-                    .foregroundColor(onPanel ? Chika.cream : Chika.creamMuted)
-                    .frame(width: 34, height: 34)
-                    .background(Chika.inkSoft)
-                    .clipShape(RoundedCornerShape(cornerRadius: 3))
+            // Show whole page (Android's ZoomOutMap): plain icon, always enabled (no-op on full page).
+            Button { withAnimation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.36)) { showWholePage() } } label: {
+                Image(systemName: "arrow.up.left.and.arrow.down.right")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundColor(Chika.cream)
+                    .frame(width: 38, height: 38)
             }
-            .disabled(!onPanel)
-            Button(rightToLeft ? "RTL" : "LTR") {
+            DirectionChip(rightToLeft: rightToLeft) {
                 rightToLeft.toggle()
                 panelCache.removeAll() // panels are ordered per-direction; re-detect under the new one
                 persist(); redetect()
             }
-                .font(.archivo(12)).foregroundColor(Chika.ink)
-                .padding(.horizontal, 10).padding(.vertical, 5)
-                .background(Chika.ochre)
-                .clipShape(RoundedCornerShape(cornerRadius: 3))
         }
-        .padding(.horizontal, 16).padding(.vertical, 10)
-        .background(Chika.ink.opacity(0.7))
+        .padding(.leading, 12).padding(.trailing, 6).padding(.top, 8).padding(.bottom, 18)
+        .background(LinearGradient(colors: [Chika.ink.opacity(0.94), .clear],
+                                   startPoint: .top, endPoint: .bottom))
     }
 
     private var bottomBar: some View {
-        HStack(alignment: .bottom) {
-            VStack(alignment: .leading, spacing: 2) {
-                KickerText("Swipe to turn", size: 8)
-                Slider(
-                    value: Binding(
-                        get: { Double(page) },
-                        set: { page = Int($0.rounded()); if case .ready(let a) = state { loadPage(a) } }
-                    ),
-                    in: 0...Double(max(pageCount - 1, 1)), step: 1
-                )
-                .tint(Chika.ochre)
-                .frame(width: 180)
+        VStack(spacing: 0) {
+            HStack {
+                Text("SWIPE TO TURN").font(.anton(12)).tracking(2).foregroundColor(Chika.creamMuted)
+                Spacer()
+                PageCoin(page: (scrubbing ? Int(scrub.rounded()) : page) + 1, total: pageCount)
             }
-            Spacer()
-            PageCoin(page: page + 1, total: pageCount)
+            Slider(
+                value: $scrub,
+                in: 0...Double(max(pageCount - 1, 1)),
+                onEditingChanged: { editing in
+                    if editing { scrubbing = true }
+                    else {
+                        scrubbing = false
+                        page = Int(scrub.rounded())
+                        if case .ready(let a) = state { loadPage(a) }
+                    }
+                }
+            )
+            .tint(Chika.ochre)
         }
-        .padding(.horizontal, 16).padding(.bottom, 12)
+        .padding(.horizontal, 20).padding(.top, 24).padding(.bottom, 12)
+        .background(LinearGradient(colors: [.clear, Chika.ink.opacity(0.97)],
+                                   startPoint: .top, endPoint: .bottom))
+        // Keep the scrubber in sync with programmatic page changes (taps/flicks) while not scrubbing.
+        .onChange(of: page) { if !scrubbing { scrub = Double($0) } }
     }
 
     // Tap zones, matching Android: left third steps back, right third steps forward (panels are
@@ -322,15 +343,44 @@ struct ReaderView: View {
         else { withAnimation { showChrome.toggle() } }
     }
 
-    // End of a one-finger drag: when not zoomed, a fast horizontal flick from the full-page view
-    // turns the page (Android's isFullPage + velocity gate); a slow drag or a pinch does nothing.
+    // Whether the current slot frames the whole page (intro or outro) — a flick only turns pages here.
+    private var isFullPage: Bool { step < 0 || step >= regions.count }
+
+    // End of a one-finger drag: a fast horizontal flick from the whole-page view (intro or outro,
+    // matching Android's isFullPageView) turns the page; otherwise the floated position is committed.
     private func endPan(velocity: CGSize, maxTouches: Int, in loader: PageLoader) {
-        if zoom > 1.01 { steadyPan = pan; return }        // was repositioning a zoomed page
-        guard maxTouches == 1, step == -1 else { return }  // flicks only from the whole-page view
-        guard abs(velocity.width) > Self.flickVelocityPxS,
-              abs(velocity.width) > abs(velocity.height) * Self.swipeHorizontalBias else { return }
-        // swipe-left advances in LTR (and is mirrored under RTL)
-        turnPage(next: (velocity.width < 0) != rightToLeft, in: loader)
+        let isFlick = maxTouches == 1 && isFullPage && zoom <= 1.01
+            && abs(velocity.width) > Self.flickVelocityPxS
+            && abs(velocity.width) > abs(velocity.height) * Self.swipeHorizontalBias
+        if isFlick {
+            // swipe-left advances in LTR (and is mirrored under RTL); loadPage resets pan.
+            turnPage(next: (velocity.width < 0) != rightToLeft, in: loader)
+        } else {
+            steadyPan = pan   // commit the floated / zoomed-pan position
+        }
+    }
+
+    // Clamps free-pan so a floated/zoomed page can't be lost off-screen: horizontal "cover" (never
+    // exposes side background), vertical "float" keeping ≥15% on screen — Android's clampPan ported
+    // onto the same computePageDraw transform (scale about centre, then translate by pan).
+    private func clampPan(_ raw: CGSize, viewSize: CGSize) -> CGSize {
+        guard let image = image else { return raw }
+        let cw = viewSize.width, ch = viewSize.height
+        let draw = CameraTransformKt.computePageDraw(
+            camera: camera,
+            bitmapW: Int32(image.cgImage?.width ?? 1),
+            bitmapH: Int32(image.cgImage?.height ?? 1),
+            containerW: Float(cw), containerH: Float(ch), fill: 0.98)
+        let scaledW = CGFloat(draw.scaledWidth) * zoom
+        let scaledH = CGFloat(draw.scaledHeight) * zoom
+        let baseLeft = cw / 2 + (CGFloat(draw.left) - cw / 2) * zoom
+        let baseTop = ch / 2 + (CGFloat(draw.top) - ch / 2) * zoom
+        let x: CGFloat = scaledW <= cw
+            ? (cw - scaledW) / 2 - baseLeft
+            : min(max(raw.width, cw - scaledW - baseLeft), -baseLeft)
+        let keep = 0.15 * min(scaledH, ch)
+        let y = min(max(raw.height, keep - scaledH - baseTop), ch - keep - baseTop)
+        return CGSize(width: x, height: y)
     }
 
     private func advance(by delta: Int, in loader: PageLoader) {
@@ -353,5 +403,27 @@ struct ReaderView: View {
         step = -1
         resetZoom()
         persist()
+    }
+}
+
+/// Reading-direction control showing its current state (LTR/RTL) — a translucent cream pill with a
+/// swap icon, matching Android's DirectionChip.
+struct DirectionChip: View {
+    let rightToLeft: Bool
+    let onTap: () -> Void
+
+    var body: some View {
+        Button(action: onTap) {
+            HStack(spacing: 5) {
+                Image(systemName: "arrow.left.arrow.right")
+                    .font(.system(size: 15, weight: .semibold)).foregroundColor(Chika.cream)
+                Text(rightToLeft ? "RTL" : "LTR")
+                    .font(.archivo(11)).tracking(1).foregroundColor(Chika.cream)
+            }
+            .padding(.horizontal, 10).padding(.vertical, 6)
+            .background(Chika.cream.opacity(0.12))
+            .clipShape(Capsule())
+        }
+        .buttonStyle(.plain)
     }
 }

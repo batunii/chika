@@ -19,31 +19,24 @@ struct LibraryView: View {
     // per-comic + default behaviour). Mirrors ReadingPrefs so the pill redraws on toggle.
     @State private var defaultRTL = ReadingPrefs.defaultRightToLeft
 
-    private let columns = [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)]
+    private let columns = [GridItem(.flexible(), spacing: 16), GridItem(.flexible(), spacing: 16)]
 
     var body: some View {
         NavigationStack(path: $path) {
             ZStack {
                 settings.ground.ignoresSafeArea()
-                Halftone(color: Chika.cream, alpha: 0.05).ignoresSafeArea()
+                Halftone(color: Chika.crimson, alpha: 0.05).ignoresSafeArea()
+                // Decorative action-burst behind the header (Android LibraryScreen).
+                StarburstShape().fill(Chika.crimson.opacity(0.14))
+                    .frame(width: 180, height: 180)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+                    .padding(.top, 10)
+                    .ignoresSafeArea()
+                    .allowsHitTesting(false)
 
                 VStack(spacing: 0) {
                     header
-                    if library.comics.isEmpty {
-                        emptyState
-                    } else {
-                        grid
-                    }
-                }
-
-                if library.importing {
-                    VStack(spacing: 10) {
-                        ProgressView().tint(Chika.ochre)
-                        KickerText("Converting CBR…")
-                    }
-                    .padding(24)
-                    .background(Chika.inkSoft.opacity(0.95))
-                    .clipShape(RoundedCornerShape(cornerRadius: 6))
+                    content
                 }
             }
             .navigationBarHidden(true)
@@ -108,26 +101,16 @@ struct LibraryView: View {
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .center, spacing: 12) {
-                ChikaMark(size: 40)
+            HStack(alignment: .top, spacing: 12) {
                 ChikaWordmark()
                 Spacer()
                 Button { showMenu = true } label: {
                     Image(systemName: "line.3.horizontal")
                         .font(.system(size: 18, weight: .bold))
                         .foregroundColor(Chika.cream)
-                        .frame(width: 38, height: 38)
+                        .frame(width: 36, height: 36)
                         .background(Chika.cream.opacity(0.10))
                         .clipShape(Circle())
-                }
-                Button { showPicker = true } label: {
-                    Image(systemName: "plus")
-                        .font(.system(size: 18, weight: .bold))
-                        .foregroundColor(Chika.ink)
-                        .frame(width: 38, height: 38)
-                        .background(Chika.ochre)
-                        .clipShape(RoundedCornerShape(cornerRadius: 3))
-                        .comicShadow(offset: 3, color: .black.opacity(0.6), corner: 3)
                 }
             }
             HStack(alignment: .center) {
@@ -139,7 +122,7 @@ struct LibraryView: View {
                     ReadingPrefs.defaultRightToLeft = defaultRTL
                 } label: {
                     VStack(alignment: .trailing, spacing: 1) {
-                        KickerText("New comics open", size: 7, color: Chika.creamMuted)
+                        Text("NEW COMICS OPEN").font(.archivo(7)).foregroundColor(Chika.creamMuted)
                         Text(defaultRTL ? "RTL" : "LTR")
                             .font(.archivo(12)).foregroundColor(Chika.ink)
                             .padding(.horizontal, 10).padding(.vertical, 4)
@@ -149,14 +132,22 @@ struct LibraryView: View {
                 }
             }
         }
-        .padding(.horizontal, 20)
-        .padding(.top, 8)
-        .padding(.bottom, 16)
+        .padding(.horizontal, 18)
+        .padding(.top, 40)
+        .padding(.bottom, 6)
     }
 
-    private var grid: some View {
+    // Grid of comic cards followed by the "LOAD COMIC" tile, matching Android's single grid (the
+    // empty-library line renders above the tile when there are no comics).
+    private var content: some View {
         ScrollView {
-            LazyVGrid(columns: columns, spacing: 16) {
+            if library.comics.isEmpty {
+                Text("No comics yet. Tap LOAD COMIC to add a CBZ or CBR.")
+                    .font(.archivo(13)).foregroundColor(Chika.creamMuted)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 18).padding(.vertical, 12)
+            }
+            LazyVGrid(columns: columns, spacing: 18) {
                 ForEach(library.comics, id: \.self) { url in
                     NavigationLink(value: url) {
                         ComicCard(url: url, progress: progress[url.lastPathComponent] ?? nil)
@@ -168,26 +159,17 @@ struct LibraryView: View {
                         }
                     }
                 }
+                AddTile(importing: library.importing) { showPicker = true }
             }
-            .padding(.horizontal, 20)
-            .padding(.bottom, 32)
+            .padding(.horizontal, 18)
+            .padding(.bottom, 48)
         }
-    }
-
-    private var emptyState: some View {
-        VStack(spacing: 16) {
-            Spacer()
-            ChikaMark(size: 72)
-            Text("NO COMICS YET").font(.anton(22)).foregroundColor(Chika.cream)
-            KickerText("Tap + to add a CBZ or CBR")
-            Spacer()
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
 
-/// A single comic in the grid: cover (or maroon halftone placeholder) under a hard comic shadow,
-/// with the title in Anton across the bottom — the Android card styling.
+/// A single comic in the grid, matching Android: a 0.7-aspect cover under a hard comic shadow with
+/// a full-width progress bar along its bottom edge, the title in Archivo below the cover, and a
+/// progress/page-count line. The whole card is a strict port of Android's ComicCard.
 struct ComicCard: View {
     let url: URL
     let progress: Progress?
@@ -195,36 +177,51 @@ struct ComicCard: View {
     @State private var pages = 0
 
     private var title: String { url.deletingPathExtension().lastPathComponent.uppercased() }
+    private var lastPage: Int { progress?.page ?? 0 }
+    private var pageCount: Int { progress?.total ?? pages }
+    private var started: Bool { lastPage > 0 }
+    // Android's fill formula: (lastPage + 1) / pageCount — page 0 already counts as "on page 1".
+    private var pct: Double { pageCount > 0 ? min(max(Double(lastPage + 1) / Double(pageCount), 0), 1) : 0 }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            ZStack(alignment: .bottomLeading) {
+        VStack(alignment: .leading, spacing: 0) {
+            ZStack(alignment: .bottom) {
                 Group {
                     if let cover {
-                        Image(uiImage: cover).resizable().aspectRatio(contentMode: .fill)
+                        Image(uiImage: cover).resizable().scaledToFill()
                     } else {
-                        ZStack {
-                            Chika.maroon
-                            Halftone(color: Chika.ink, alpha: 0.18)
-                        }
+                        GeneratedCover(title: title)
                     }
                 }
-                .frame(height: 220)
-                .frame(maxWidth: .infinity)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .clipped()
 
-                LinearGradient(colors: [.clear, Chika.ink.opacity(0.85)], startPoint: .center, endPoint: .bottom)
-
-                Text(title)
-                    .font(.anton(20)).foregroundColor(Chika.cream).lineLimit(2)
-                    .padding(12)
+                // Progress bar inside the cover's bottom edge — always shown (0% when unstarted).
+                GeometryReader { geo in
+                    ZStack(alignment: .leading) {
+                        Chika.ink
+                        Chika.ochre.frame(width: geo.size.width * CGFloat(pct))
+                    }
+                }
+                .frame(height: 7)
             }
-            .frame(height: 220)
+            .aspectRatio(0.7, contentMode: .fit)
+            .background(Chika.inkSoft)
             .clipShape(RoundedCornerShape(cornerRadius: 4))
-            .overlay(RoundedCornerShape(cornerRadius: 4).stroke(Chika.ink, lineWidth: 2))
-            .comicShadow(offset: 4, color: .black.opacity(0.55), corner: 4)
+            .overlay(RoundedCornerShape(cornerRadius: 4).stroke(Chika.ink, lineWidth: 3))
+            .comicShadow(offset: 5, color: .black.opacity(0.70), corner: 4)
 
-            progressFooter
+            Text(title)
+                .font(.archivo(12)).foregroundColor(Chika.cream)
+                .lineLimit(2).multilineTextAlignment(.leading)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.top, 9)
+            Text(started
+                 ? "\(Int(pct * 100))% · pg \(lastPage + 1)/\(pageCount)"
+                 : "\(pageCount) pages")
+                .font(.archivo(9.5)).foregroundColor(Chika.creamMuted)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.top, 2)
         }
         .task {
             let loaded = await CoverLoader.load(for: url)
@@ -232,25 +229,50 @@ struct ComicCard: View {
             pages = loaded.pageCount
         }
     }
+}
 
-    @ViewBuilder
-    private var progressFooter: some View {
-        if let progress, progress.total > 0 {
-            VStack(alignment: .leading, spacing: 3) {
-                GeometryReader { geo in
-                    ZStack(alignment: .leading) {
-                        Capsule().fill(Chika.inkSoft).frame(height: 3)
-                        Capsule().fill(Chika.ochre)
-                            .frame(width: max(3, geo.size.width * progress.fraction), height: 3)
+/// Placeholder cover for comics with no extractable page-0 image: ink-soft ground, crimson halftone,
+/// and the title in Anton bottom-left — Android's GeneratedCover.
+struct GeneratedCover: View {
+    let title: String
+    var body: some View {
+        ZStack(alignment: .bottomLeading) {
+            Chika.inkSoft
+            Halftone(color: Chika.crimson, alpha: 0.18)
+            Text(title).font(.anton(22)).foregroundColor(Chika.cream).padding(12)
+        }
+    }
+}
+
+/// The in-grid "LOAD COMIC" tile: a dashed-border cell with an ochre halftone and a crimson
+/// starburst holding a + (or a spinner while importing) — Android's AddTile.
+struct AddTile: View {
+    let importing: Bool
+    let onTap: () -> Void
+
+    var body: some View {
+        Button(action: onTap) {
+            VStack(spacing: 12) {
+                ZStack {
+                    StarburstShape().fill(Chika.crimson).frame(width: 64, height: 64)
+                    if importing {
+                        ProgressView().tint(Chika.cream)
+                    } else {
+                        Image(systemName: "plus").font(.system(size: 22, weight: .bold)).foregroundColor(Chika.cream)
                     }
                 }
-                .frame(height: 3)
-                KickerText("\(progress.percent)% · pg \(progress.page + 1)/\(progress.total)", size: 7)
+                Text("LOAD COMIC").font(.anton(14)).foregroundColor(Chika.cream)
             }
-            .padding(.horizontal, 2)
-        } else {
-            KickerText(pages > 0 ? "\(pages) pages" : "Unread", size: 7).padding(.horizontal, 2)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .aspectRatio(0.7, contentMode: .fit)
+            .halftone(color: Chika.ochre, alpha: 0.10)
+            .overlay(
+                RoundedCornerShape(cornerRadius: 4)
+                    .stroke(Chika.creamMuted, style: StrokeStyle(lineWidth: 3, dash: [14, 10]))
+            )
+            .clipShape(RoundedCornerShape(cornerRadius: 4))
         }
+        .buttonStyle(.plain)
     }
 }
 

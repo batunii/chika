@@ -72,7 +72,7 @@ struct MenuView: View {
                     Link(destination: Self.repoURL) {
                         HStack(spacing: 10) {
                             Image(systemName: "heart.fill")
-                                .font(.system(size: 16)).foregroundColor(Chika.cream)
+                                .font(.system(size: 18)).foregroundColor(Chika.cream)
                             Text("SUPPORT / DONATE")
                                 .font(.anton(15)).tracking(0.5).foregroundColor(Chika.cream)
                         }
@@ -107,12 +107,12 @@ private struct SectionLabel: View {
     }
 }
 
-/// A titled settings row with a trailing switch, over a soft ground — the Android ToggleRow.
+/// A titled settings row with a trailing switch. Tapping anywhere on the row toggles it, and the
+/// ground stays ink-soft even in AMOLED (matching Android's hardcoded InkSoft row).
 private struct ToggleRow: View {
     let title: String
     let subtitle: String
     @Binding var isOn: Bool
-    @EnvironmentObject private var settings: ChikaSettings
 
     var body: some View {
         HStack(alignment: .center, spacing: 12) {
@@ -122,12 +122,31 @@ private struct ToggleRow: View {
                     .font(.archivo(10.5)).lineSpacing(3).foregroundColor(Chika.creamMuted)
             }
             Spacer(minLength: 0)
-            Toggle("", isOn: $isOn)
-                .labelsHidden()
-                .tint(Chika.ochre)
+            ChikaSwitch(isOn: $isOn)
         }
         .padding(.init(top: 12, leading: 16, bottom: 12, trailing: 10))
-        .background(settings.groundSoft)
+        .background(Chika.inkSoft)
         .clipShape(RoundedCornerShape(cornerRadius: 6))
+        .contentShape(Rectangle())
+        .onTapGesture { withAnimation(.easeInOut(duration: 0.15)) { isOn.toggle() } }
+    }
+}
+
+/// Brand-styled switch: ochre track + ink thumb when on, ink track + muted-cream thumb when off,
+/// matching Android's SwitchDefaults colors (stock SwiftUI Toggle can't recolor the thumb).
+private struct ChikaSwitch: View {
+    @Binding var isOn: Bool
+
+    var body: some View {
+        ZStack(alignment: isOn ? .trailing : .leading) {
+            Capsule()
+                .fill(isOn ? Chika.ochre : Chika.ink)
+                .overlay(Capsule().stroke(isOn ? Chika.ochre : Chika.creamMuted, lineWidth: 2))
+            Circle()
+                .fill(isOn ? Chika.ink : Chika.creamMuted)
+                .padding(3)
+        }
+        .frame(width: 46, height: 28)
+        .onTapGesture { withAnimation(.easeInOut(duration: 0.15)) { isOn.toggle() } }
     }
 }
