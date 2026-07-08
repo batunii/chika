@@ -1,17 +1,17 @@
 name: Sim Check
 
-# Visual verification loop for the iOS reader when no local Xcode is available: build the app for
-# the simulator, boot an iPhone 13 Pro Max (428x926pt — the framing-bug report device class), drive
-# the reader with the CHIKA_DEBUG_* hooks onto a synthetic test comic (iosApp/ci/SyntheticManga.cbz,
-# generated art — no copyrighted content), and upload screenshots as artifacts for inspection.
+# Visual verification for the iOS reader: build the app once, then screenshot the reader across a
+# device matrix (big phone / small phone / current flagship / iPad) in both reading directions,
+# using the CHIKA_DEBUG_* hooks on a synthetic test comic (iosApp/ci/SyntheticManga.cbz — generated
+# art, no copyrighted content). Screenshots upload as artifacts for inspection.
 on:
   push:
     branches: [ "ci/sim-check" ]
   workflow_dispatch:
 
 jobs:
-  sim:
-    name: Boot simulator and screenshot the reader
+  build:
+    name: Build simulator app
     runs-on: macos-latest
     steps:
       - name: Checkout
@@ -47,29 +47,58 @@ jobs:
             -derivedDataPath iosApp/build ARCHS=arm64 \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build
 
-      - name: Create and boot simulator
+      - name: Upload app bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: chika-sim-app
+          path: iosApp/build/Build/Products/Debug-iphonesimulator/Chika.app
+          if-no-files-found: error
+
+  matrix:
+    name: ${{ matrix.label }}
+    needs: build
+    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: iphone-13-pro-max
+            devicetype: iPhone 13 Pro Max
+          - label: iphone-se-3
+            devicetype: iPhone SE (3rd generation)
+          - label: iphone-16-pro-max
+            devicetype: iPhone 16 Pro Max
+          - label: ipad-pro-11
+            devicetype: iPad Pro 11-inch (M4)
+    steps:
+      - name: Checkout (for the test comic)
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: iosApp/ci
+
+      - name: Download app bundle
+        uses: actions/download-artifact@v4
+        with:
+          name: chika-sim-app
+          path: Chika.app
+
+      - name: Boot simulator
         id: sim
         run: |
-          DEVICE=$(xcrun simctl create chika-test \
-            com.apple.CoreSimulator.SimDeviceType.iPhone-13-Pro-Max 2>/dev/null) \
-          || DEVICE=$(xcrun simctl create chika-test \
-            com.apple.CoreSimulator.SimDeviceType.iPhone-14-Plus)
+          DEVICE=$(xcrun simctl create matrix-test "${{ matrix.devicetype }}")
           echo "device=$DEVICE" >> "$GITHUB_OUTPUT"
           xcrun simctl boot "$DEVICE"
           xcrun simctl bootstatus "$DEVICE" -b
-          xcrun simctl list devices | grep chika-test
 
       - name: Install app and seed test comic
         run: |
           DEVICE='${{ steps.sim.outputs.device }}'
-          xcrun simctl install "$DEVICE" iosApp/build/Build/Products/Debug-iphonesimulator/Chika.app
+          xcrun simctl install "$DEVICE" Chika.app
           CONT=$(xcrun simctl get_app_container "$DEVICE" com.chakra.comicreader data)
           mkdir -p "$CONT/Documents/Comics"
           cp iosApp/ci/SyntheticManga.cbz "$CONT/Documents/Comics/"
 
-      # Scenario 1: page 0, panel 1 (RTL) — the framed-panel camera. The green debug overlay in the
-      # screenshot reports the canvas size + zoom/pan the draw actually used.
-      - name: Screenshot panel framing
+      - name: Screenshot RTL panel 1
         run: |
           DEVICE='${{ steps.sim.outputs.device }}'
           SIMCTL_CHILD_CHIKA_DEBUG_OPEN=Synthetic \
@@ -78,10 +107,9 @@ jobs:
           SIMCTL_CHILD_CHIKA_DEBUG_RTL=1 \
             xcrun simctl launch "$DEVICE" com.chakra.comicreader
           sleep 20
-          xcrun simctl io "$DEVICE" screenshot sim-panel1.png
+          xcrun simctl io "$DEVICE" screenshot "${{ matrix.label }}-rtl-panel1.png"
 
-      # Scenario 2: cold relaunch on the whole-page intro with the numbered detection overlay.
-      - name: Screenshot detection overlay
+      - name: Screenshot LTR panel 1
         run: |
           DEVICE='${{ steps.sim.outputs.device }}'
           xcrun simctl terminate "$DEVICE" com.chakra.comicreader || true
@@ -92,18 +120,16 @@ jobs:
           sleep 2
           SIMCTL_CHILD_CHIKA_DEBUG_OPEN=Synthetic \
           SIMCTL_CHILD_CHIKA_DEBUG_PAGE=0 \
-          SIMCTL_CHILD_CHIKA_DEBUG_BOXES=1 \
-          SIMCTL_CHILD_CHIKA_DEBUG_RTL=1 \
+          SIMCTL_CHILD_CHIKA_DEBUG_STEP=0 \
+          SIMCTL_CHILD_CHIKA_DEBUG_RTL=0 \
             xcrun simctl launch "$DEVICE" com.chakra.comicreader
           sleep 20
-          xcrun simctl io "$DEVICE" screenshot sim-boxes.png
+          xcrun simctl io "$DEVICE" screenshot "${{ matrix.label }}-ltr-panel1.png"
 
       - name: Upload screenshots
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: sim-screenshots
-          path: |
-            sim-panel1.png
-            sim-boxes.png
+          name: shots-${{ matrix.label }}
+          path: "*.png"
           if-no-files-found: error
