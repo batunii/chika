@@ -67,10 +67,6 @@ struct ReaderView: View {
 
     private var isReady: Bool { if case .ready = state { return true }; return false }
 
-    // Actual size handed to the page Canvas, captured from the live layout. TEMP diagnostic state
-    // (remove with the overlay below once device framing is confirmed).
-    @State private var canvasBox: CGSize = .zero
-
     var body: some View {
         // Only the page canvas escapes the safe area (full-bleed, origin-0, like Android's
         // full-window reader). The chrome stays in the normal safe-area layout, so SwiftUI itself
@@ -93,8 +89,6 @@ struct ReaderView: View {
             case .ready(let loader):
                 GeometryReader { screen in
                     readerBody(loader, size: screen.size)
-                        .onAppear { canvasBox = screen.size }
-                        .onChange(of: screen.size) { canvasBox = $0 }
                 }
                 .ignoresSafeArea()
             }
@@ -108,16 +102,6 @@ struct ReaderView: View {
             if showChrome && isReady && pageCount > 1 {
                 bottomBar.transition(.move(edge: .bottom).combined(with: .opacity))
             }
-        }
-        // TEMP diagnostic (remove once device framing is confirmed): the size the Canvas really
-        // gets plus the live zoom/pan, so one device screenshot pins any remaining divergence.
-        .overlay(alignment: .topLeading) {
-            Text(String(format: "cvs %.0f×%.0f · z %.2f · p %.0f/%.0f",
-                        canvasBox.width, canvasBox.height, zoom, pan.width, pan.height))
-                .font(.system(size: 9, design: .monospaced))
-                .foregroundColor(.green)
-                .padding(3).background(Color.black.opacity(0.55))
-                .padding(.top, 2).padding(.leading, 3)
         }
         .navigationBarHidden(true)
         .statusBarHidden(!showChrome)
