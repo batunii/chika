@@ -26,10 +26,9 @@ struct ReaderView: View {
     // Sentinel restoreStep meaning "land on this page's whole-page outro" (used by backward turns);
     // resolved to regions.count once the page's regions are known.
     private static let outroSlot = Int.max
-    // Android's camera motion: tween(360, FastOutSlowInEasing) between framed views, and
-    // tween(240) for the double-tap recenter. FastOutSlowIn == cubic-bezier(0.4, 0, 0.2, 1).
+    // Android's camera motion: tween(360, FastOutSlowInEasing) between framed views.
+    // FastOutSlowIn == cubic-bezier(0.4, 0, 0.2, 1).
     private static let cameraTween = Animation.timingCurve(0.4, 0, 0.2, 1, duration: 0.36)
-    private static let recenterTween = Animation.timingCurve(0.4, 0, 0.2, 1, duration: 0.24)
 
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var settings: ChikaSettings
@@ -259,11 +258,12 @@ struct ReaderView: View {
             Reticle(color: Chika.crimson.opacity(0.45), inset: 6, length: 16, stroke: 2).padding(6)
         } }
         // UIKit gesture layer: pinch to zoom (1×–5×), pan when zoomed, tap zones, double-tap to
-        // recenter, and a velocity flick to turn pages — all recognized simultaneously.
+        // jump back to the whole page, and a velocity flick to turn pages — all recognized
+        // simultaneously.
         .overlay {
             ReaderGestures(
                 onTap: { location, sz in tapZone(x: location.x, width: sz.width, in: loader) },
-                onDoubleTap: { withAnimation(Self.recenterTween) { resetZoom() } },
+                onDoubleTap: { showWholePage() },
                 onPinchChanged: { scale in zoom = min(max(steadyZoom * scale, 1), 5) },
                 onPinchEnded: { if zoom <= 1.01 { resetZoom() } else { steadyZoom = zoom } },
                 onPanChanged: { t in
@@ -353,7 +353,7 @@ struct ReaderView: View {
 
     // Tap zones, matching Android: left third steps back, right third steps forward (panels are
     // pre-ordered in reading direction, so this is RTL-agnostic), middle third toggles chrome. The
-    // double-tap (recenter) is disambiguated natively by the UIKit tap recognizers, so no defer.
+    // double-tap (show whole page) is disambiguated natively by the UIKit tap recognizers, so no defer.
     private func tapZone(x: CGFloat, width: CGFloat, in loader: PageLoader) {
         if x < width / 3 { advance(by: -1, in: loader) }
         else if x > width * 2 / 3 { advance(by: 1, in: loader) }

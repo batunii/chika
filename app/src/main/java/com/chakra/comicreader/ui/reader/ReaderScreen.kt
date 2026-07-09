@@ -142,6 +142,7 @@ fun ReaderScreen(
                 onNextPage = viewModel::nextPage,
                 onPrevPage = viewModel::previousPage,
                 onToggleChrome = { chromeVisible = !chromeVisible },
+                onShowFullPage = viewModel::showFullPage,
             )
         }
 
@@ -271,6 +272,7 @@ private fun PageViewer(
     onNextPage: () -> Unit,
     onPrevPage: () -> Unit,
     onToggleChrome: () -> Unit,
+    onShowFullPage: () -> Unit,
 ) {
     val bitmap = state.page ?: return
     val image = remember(bitmap) { bitmap.asImageBitmap() }
@@ -300,7 +302,8 @@ private fun PageViewer(
         userScale = 1f; userPanX = 0f; userPanY = 0f
     }
 
-    // Animate the view transform back to the framed default (double-tap to recenter).
+    // Animate the view transform back to the framed default (used on double-tap alongside the
+    // jump back to the whole-page slot, so a pinch zoom glides out instead of snapping).
     val resetView: () -> Unit = {
         scope.launch {
             val s0 = userScale; val x0 = userPanX; val y0 = userPanY
@@ -314,8 +317,8 @@ private fun PageViewer(
 
     // A single pointer handler so taps, double-taps, and pan/zoom never fight over the same touch.
     // Tap zones drive panel navigation (which crosses page boundaries) and chrome; one-finger drag
-    // pans the floating comic; pinch zooms; double-tap recenters. A single tap is deferred briefly so
-    // a following tap can be recognised as a double-tap.
+    // pans the floating comic; pinch zooms; double-tap jumps back to the whole-page view. A single
+    // tap is deferred briefly so a following tap can be recognised as a double-tap.
     var pendingTap by remember { mutableStateOf<Job?>(null) }
 
     Box(
@@ -368,9 +371,13 @@ private fun PageViewer(
                         val tapX = down.position.x
                         val inFlight = pendingTap
                         if (inFlight != null && inFlight.isActive) {
-                            // Second quick tap → double-tap: cancel the pending single tap and recenter.
+                            // Second quick tap → double-tap: back to the whole-page view from any
+                            // panel (mirrors the ZoomOutMap button); resetView glides the pinch
+                            // zoom out, and covers the already-on-full-page case where the slot
+                            // doesn't change.
                             inFlight.cancel()
                             pendingTap = null
+                            onShowFullPage()
                             resetView()
                         } else {
                             pendingTap = scope.launch {
