@@ -30,18 +30,16 @@ final class LibraryStore: ObservableObject {
         refresh()
     }
 
-    /// Raw view of what's actually on disk, for the on-screen diagnostic.
-    var storageReport: String {
-        let all = (try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)) ?? []
-        let names = all.map { $0.lastPathComponent }.sorted()
-        return "dir: \(dir.path)\nfiles (\(names.count)): \(names.isEmpty ? "—" : names.joined(separator: ", "))"
-    }
-
     func refresh() {
         let files = (try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)) ?? []
         comics = files
             .filter { ["cbz", "zip"].contains($0.pathExtension.lowercased()) }
-            .sorted { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending }
+            // Most-recently-opened first (Android's `ORDER BY lastOpened DESC`), then natural filename.
+            .sorted {
+                let ta = ReadingProgress.openedAt($0), tb = ReadingProgress.openedAt($1)
+                if ta != tb { return ta > tb }
+                return $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending
+            }
     }
 
     func importComic(from url: URL) {
@@ -72,8 +70,10 @@ final class LibraryStore: ObservableObject {
             importing = true
             Task {
                 defer { try? FileManager.default.removeItem(at: staged) }
-                do { try await CbrConverter.convertToCbz(source: staged, destination: dest) }
-                catch { importError = "Couldn't import \(url.lastPathComponent): \(error.localizedDescription)" }
+                do {
+                    try await CbrConverter.convertToCbz(source: staged, destination: dest)
+                    ReadingProgress.markOpened(dest)   // fresh import sorts to the top
+                } catch { importError = "Couldn't import \(url.lastPathComponent): \(error.localizedDescription)" }
                 importing = false
                 refresh()
             }
@@ -82,6 +82,7 @@ final class LibraryStore: ObservableObject {
             do {
                 try? FileManager.default.removeItem(at: dest)
                 try FileManager.default.copyItem(at: url, to: dest)
+                ReadingProgress.markOpened(dest)   // fresh import sorts to the top
             } catch {
                 importError = "Couldn't import \(url.lastPathComponent): \(error.localizedDescription)"
             }

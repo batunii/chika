@@ -41,6 +41,18 @@ jobs:
       - name: Generate Xcode project
         run: xcodegen generate --spec iosApp/project.yml --project iosApp
 
+      # xcodegen regenerates Info.plist with default 1.0 (1); stamp a real version (from the tag) and
+      # a unique, increasing build number (the run number) so each build is identifiable and sideload
+      # always treats it as an update. Surfaced in the app's Menu/About screen.
+      - name: Stamp version + build
+        run: |
+          PLIST=iosApp/Sources/Info.plist
+          VER="${GITHUB_REF_NAME#ios-v}"
+          case "$VER" in ios-*|"") VER="0.3.1" ;; esac
+          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString ${VER}" "$PLIST"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${GITHUB_RUN_NUMBER}" "$PLIST"
+          echo "Stamped $PLIST → version ${VER} (build ${GITHUB_RUN_NUMBER})"
+
       - name: Install pods
         run: cd iosApp && pod install
 

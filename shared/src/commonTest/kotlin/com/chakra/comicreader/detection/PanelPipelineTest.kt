@@ -29,6 +29,18 @@ class PanelPipelineTest {
             PanelOrdering.order(shuffled, rightToLeft = false),
             bubbles, 1000, 1500, rightToLeft = false,
         )
-        assertEquals(manual, viaPipeline)
+        // The pipeline is ordering → planning → a small outward pad (breathing room for overflowing
+        // text). So it must keep the same count and order, and each region must CONTAIN its planned
+        // counterpart (padding only grows, clamped to the page) — never shrink or reorder.
+        assertEquals(manual.size, viaPipeline.size, "pipeline should preserve the planned region count")
+        for (i in manual.indices) {
+            val m = manual[i]
+            val v = viaPipeline[i]
+            assertTrue(
+                v.left <= m.left + 1e-4f && v.top <= m.top + 1e-4f &&
+                    v.right >= m.right - 1e-4f && v.bottom >= m.bottom - 1e-4f,
+                "pipeline region $i should be a padded superset of the planned region: $v vs $m",
+            )
+        }
     }
 }

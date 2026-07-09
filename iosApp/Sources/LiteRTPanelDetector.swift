@@ -95,10 +95,15 @@ final class LiteRTPanelDetector {
             ctx.interpolationQuality = .medium
             ctx.setFillColor(red: 114/255, green: 114/255, blue: 114/255, alpha: 1)
             ctx.fill(CGRect(x: 0, y: 0, width: size, height: size))
-            // Flip so row 0 of the buffer is the top of the page (upright, matching Android).
-            ctx.translateBy(x: 0, y: CGFloat(size))
-            ctx.scaleBy(x: 1, y: -1)
-            ctx.draw(cg, in: CGRect(x: CGFloat(lb.padX), y: CGFloat(lb.padY),
+            // NO flip: a raw CGBitmapContext already stores row 0 as the TOP scanline when a
+            // CGImage is drawn upright in CG coordinates. (A translate/scale(1,-1) "flip" here fed
+            // the model an upside-down page, so every detected box came back y-mirrored and the
+            // reader framed the wrong panels — the "framing is off on device" bug.) CG's origin is
+            // bottom-left, so the letterbox's TOP padding of padY maps to a draw rect at
+            // y = size - padY - newH; the image's top scanline then lands at buffer row padY,
+            // byte-identical to Android's placement even when the total padding is odd.
+            ctx.draw(cg, in: CGRect(x: CGFloat(lb.padX),
+                                    y: CGFloat(Int(size) - Int(lb.padY) - Int(lb.newH)),
                                     width: CGFloat(lb.newW), height: CGFloat(lb.newH)))
             return true
         }

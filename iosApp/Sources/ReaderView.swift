@@ -19,7 +19,20 @@ struct ReaderView: View {
     private static let ioQueue = DispatchQueue(label: "chika.reader.io", qos: .userInitiated)
     private static let detectQueue = DispatchQueue(label: "chika.reader.detect", qos: .userInitiated)
 
+    // Flick tuning ported from Android's ReaderScreen: a page turn needs a genuine horizontal flick
+    // (velocity, not distance), biased against vertical drags, so a slow reposition doesn't turn.
+    private static let flickVelocityPxS: CGFloat = 700  // Android FLICK_VELOCITY_PX_S
+    private static let swipeHorizontalBias: CGFloat = 1.2 // Android SWIPE_HORIZONTAL_BIAS
+    // Sentinel restoreStep meaning "land on this page's whole-page outro" (used by backward turns);
+    // resolved to regions.count once the page's regions are known.
+    private static let outroSlot = Int.max
+    // Android's camera motion: tween(360, FastOutSlowInEasing) between framed views, and
+    // tween(240) for the double-tap recenter. FastOutSlowIn == cubic-bezier(0.4, 0, 0.2, 1).
+    private static let cameraTween = Animation.timingCurve(0.4, 0, 0.2, 1, duration: 0.36)
+    private static let recenterTween = Animation.timingCurve(0.4, 0, 0.2, 1, duration: 0.24)
+
     @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var settings: ChikaSettings
     @State private var state: LoadState = .loading
     @State private var page = 0
     @State private var pageCount = 1
@@ -33,25 +46,36 @@ struct ReaderView: View {
     // Detected panels cached per page (in the current reading direction) so back/forward and
     // prefetched pages don't re-run the detector. Cleared when the direction changes.
     @State private var panelCache: [Int: [Panel]] = [:]
-    // overlay all detected panels on the whole page; CHIKA_DEBUG_BOXES forces it on at launch (QA).
-    @State private var debugBoxes = ProcessInfo.processInfo.environment["CHIKA_DEBUG_BOXES"] != nil
     // Manual zoom/pan layered on top of the panel-framing camera (pinch to zoom, drag to pan).
     @State private var zoom: CGFloat = 1
     @State private var steadyZoom: CGFloat = 1
     @State private var pan: CGSize = .zero
     @State private var steadyPan: CGSize = .zero
-    // How tightly a panel fills the screen; user-cyclable for taste (display-only, no detect impact).
-    @State private var fill: Float = ReadingPrefs.zoomFill
+    // Page scrubber state (commit on release, not per-tick) + per-page fade-in alpha.
+    @State private var scrub: Double = 0
+    @State private var scrubbing = false
+    @State private var pageAlpha: Double = 1
 
-    private var title: String { comicURL.deletingPathExtension().lastPathComponent.uppercased() }
+    private var title: String { comicURL.deletingPathExtension().lastPathComponent }
+    // Slot model matching Android: step -1 = whole-page intro, 0…n-1 = panels, n = whole-page outro.
+    // The intro and outro both frame the whole page, so page turns always land zoomed-out.
     private var camera: Panel {
-        if debugBoxes { return Panel.companion.FULL_PAGE } // show the full page to overlay all boxes
-        return (step >= 0 && step < regions.count) ? regions[step] : Panel.companion.FULL_PAGE
+        (step >= 0 && step < regions.count) ? regions[step] : Panel.companion.FULL_PAGE
     }
+    // Whether the current slot is a framed panel (vs. the whole-page intro/outro).
+    private var onPanel: Bool { step >= 0 && step < regions.count }
+
+    private var isReady: Bool { if case .ready = state { return true }; return false }
 
     var body: some View {
+        // Only the page canvas escapes the safe area (full-bleed, origin-0, like Android's
+        // full-window reader). The chrome stays in the normal safe-area layout, so SwiftUI itself
+        // keeps the top bar below the notch and the scrubber above the home indicator — no manual
+        // inset math. (An earlier version put .ignoresSafeArea() on a root GeometryReader and read
+        // proxy.safeAreaInsets for the chrome padding — but ignoring the safe area zeroes those
+        // insets, which shoved the title under the status bar and the slider under the home bar.)
         ZStack {
-            Chika.ink.ignoresSafeArea()
+            settings.ground.ignoresSafeArea()
             switch state {
             case .loading:
                 ProgressView().tint(Chika.ochre)
@@ -63,7 +87,20 @@ struct ReaderView: View {
                 }
                 .padding()
             case .ready(let loader):
-                readerBody(loader)
+                GeometryReader { screen in
+                    readerBody(loader, size: screen.size)
+                }
+                .ignoresSafeArea()
+            }
+        }
+        .overlay(alignment: .top) {
+            if showChrome && isReady {
+                topBar.transition(.move(edge: .top).combined(with: .opacity))
+            }
+        }
+        .overlay(alignment: .bottom) {
+            if showChrome && isReady && pageCount > 1 {
+                bottomBar.transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
         .navigationBarHidden(true)
@@ -90,6 +127,7 @@ struct ReaderView: View {
                 page = min(max(pi, 0), pageCount - 1)
             }
             state = .ready(loader)
+            ReadingProgress.markOpened(comicURL)   // bump recency so it sorts to the top of the library
             // QA hook: start on a specific panel index (never set in production).
             var restore = ReadingProgress.get(comicURL)?.step ?? -1
             if let s = ProcessInfo.processInfo.environment["CHIKA_DEBUG_STEP"], let si = Int(s) { restore = si }
@@ -104,10 +142,13 @@ struct ReaderView: View {
     /// the watchdog. A serial queue avoids concurrent ZIP reads (ZIPFoundation isn't thread-safe),
     /// and a token ensures only the latest page renders when scrubbing fast.
     private func loadPage(_ loader: PageLoader, restoreStep: Int = -1) {
-        step = restoreStep
         regions = panelCache[page] ?? [Panel.companion.FULL_PAGE]
+        // Resolve the outro sentinel now that this page's regions are known (backward page turns
+        // land on the whole-page outro, matching Android).
+        step = (restoreStep == Self.outroSlot) ? regions.count : restoreStep
         resetZoom()
         persist()
+        pageAlpha = 0.35   // fades up to 1 once the page renders (Android's 280ms page fade-in)
 
         loadToken &+= 1
         let token = loadToken
@@ -117,9 +158,13 @@ struct ReaderView: View {
             DispatchQueue.main.async {
                 guard token == self.loadToken else { return } // a newer load superseded this one
                 self.image = img
+                withAnimation(.easeOut(duration: 0.28)) { self.pageAlpha = 1 }
                 if let cached = self.panelCache[target] {
-                    self.regions = cached
-                    if self.step >= cached.count { self.step = cached.count - 1 }
+                    withAnimation(Self.cameraTween) {   // land on the restored slot with the camera tween
+                        self.regions = cached
+                        // Keep intro (-1) / outro (count) as whole-page; clamp only strays past the outro.
+                        if self.step > cached.count { self.step = cached.count }
+                    }
                 } else {
                     self.redetect()
                 }
@@ -158,13 +203,11 @@ struct ReaderView: View {
             DispatchQueue.main.async {
                 self.panelCache[forPage] = found
                 guard forPage == self.page else { return }
-                self.regions = found
-                if self.step >= found.count { self.step = found.count - 1 } // keep a restored panel in range
-                self.detecting = false
-                // QA hook: auto-split the current region once, to demonstrate the manual split.
-                if ProcessInfo.processInfo.environment["CHIKA_DEBUG_SPLIT"] != nil, self.step >= 0 {
-                    self.splitCurrentRegion()
+                withAnimation(Self.cameraTween) {   // glide into the framed panel when detection lands
+                    self.regions = found
+                    if self.step > found.count { self.step = found.count } // keep intro/outro/panel in range
                 }
+                self.detecting = false
             }
         }
     }
@@ -186,241 +229,272 @@ struct ReaderView: View {
     }
 
     @ViewBuilder
-    private func readerBody(_ loader: PageLoader) -> some View {
-        GeometryReader { geo in
-            ZStack {
-                if let image {
-                    let draw = CameraTransformKt.computePageDraw(
-                        camera: camera,
-                        bitmapW: Int32(image.cgImage?.width ?? 1),
-                        bitmapH: Int32(image.cgImage?.height ?? 1),
-                        containerW: Float(geo.size.width),
-                        containerH: Float(geo.size.height),
-                        // Default 0.98 matches Android; user can cycle this in the reader for taste.
-                        fill: fill
-                    )
-                    Image(uiImage: image)
-                        .resizable()
-                        .frame(width: CGFloat(draw.scaledWidth), height: CGFloat(draw.scaledHeight))
-                        .offset(x: CGFloat(draw.left), y: CGFloat(draw.top))
-                        .frame(width: geo.size.width, height: geo.size.height, alignment: .topLeading)
-                        .scaleEffect(zoom)
-                        .offset(pan)
-                        .animation(.spring(response: 0.45, dampingFraction: 0.85), value: step)
-                        .animation(.spring(response: 0.45, dampingFraction: 0.85), value: page)
-                } else {
-                    ProgressView().tint(Chika.ochre)
-                }
+    private func readerBody(_ loader: PageLoader, size: CGSize) -> some View {
+        // `size` is the true full screen (from the GeometryReader that ignores the safe area), so
+        // the page is framed in the exact origin-0 full-screen container the sim/Android assume.
+        // The page is a plain Image carried by one animatable transform (CameraFraming) that runs
+        // the shared computePageDraw per frame — so stepping between panels TWEENS the camera the
+        // way Android's Animatable camera does (a Canvas can't animate; it jump-cuts).
+        ZStack(alignment: .topLeading) {
+            if let image, let cg = image.cgImage {
+                Image(uiImage: image)
+                    .resizable()
+                    .frame(width: CGFloat(cg.width), height: CGFloat(cg.height))
+                    .modifier(CameraFraming(
+                        camL: CGFloat(camera.left), camT: CGFloat(camera.top),
+                        camR: CGFloat(camera.right), camB: CGFloat(camera.bottom),
+                        zoom: zoom, panX: pan.width, panY: pan.height,
+                        container: size))
+                    .opacity(pageAlpha)
             }
-            .frame(width: geo.size.width, height: geo.size.height)
-            .clipped()
-            .overlay { if showChrome { Reticle(color: Chika.cream, inset: 6) } }
-            .overlay {
-                // Debug: draw every planned panel box (in reading order) over the whole page, so a
-                // screenshot can be compared to Android to confirm detection parity.
-                if debugBoxes, let image {
-                    Canvas { ctx, sz in
-                        let d = CameraTransformKt.computePageDraw(
-                            camera: Panel.companion.FULL_PAGE,
-                            bitmapW: Int32(image.cgImage?.width ?? 1),
-                            bitmapH: Int32(image.cgImage?.height ?? 1),
-                            containerW: Float(sz.width), containerH: Float(sz.height), fill: 0.98)
-                        let ox = CGFloat(d.left), oy = CGFloat(d.top)
-                        let sw = CGFloat(d.scaledWidth), sh = CGFloat(d.scaledHeight)
-                        for (i, r) in regions.enumerated() {
-                            let rect = CGRect(x: ox + CGFloat(r.left) * sw, y: oy + CGFloat(r.top) * sh,
-                                              width: CGFloat(r.width) * sw, height: CGFloat(r.height) * sh)
-                            ctx.stroke(Path(rect), with: .color(.red), lineWidth: 2)
-                            ctx.draw(Text("\(i + 1)").font(.system(size: 15, weight: .black)).foregroundColor(.yellow),
-                                     at: CGPoint(x: rect.minX + 12, y: rect.minY + 12))
-                        }
-                        // Diagnostic readout: overlap score + panel count (for tuning the reliability gate).
-                        let ovl = PanelReliability.shared.overlapScore(panels: regions)
-                        let reliable = PanelReliability.shared.isReliable(panels: regions)
-                        ctx.draw(Text(String(format: "ovl=%.3f n=%d %@", ovl, regions.count, reliable ? "OK" : "FALLBACK"))
-                            .font(.system(size: 16, weight: .black)).foregroundColor(.green),
-                                 at: CGPoint(x: sz.width / 2, y: 24))
-                    }
-                    .allowsHitTesting(false)
-                }
-            }
-            .contentShape(Rectangle())
-            // Pinch to zoom; drag to pan when zoomed, or swipe to turn the page when not.
-            .gesture(
-                SimultaneousGesture(
-                    MagnificationGesture()
-                        .onChanged { value in zoom = min(max(steadyZoom * value, 1), 5) }
-                        .onEnded { _ in
-                            if zoom <= 1.01 { resetZoom() } else { steadyZoom = zoom }
-                        },
-                    DragGesture(minimumDistance: 14)
-                        .onChanged { value in
-                            guard zoom > 1.01 else { return }
-                            pan = CGSize(width: steadyPan.width + value.translation.width,
-                                         height: steadyPan.height + value.translation.height)
-                        }
-                        .onEnded { value in
-                            if zoom > 1.01 { steadyPan = pan; return }
-                            let dx = value.translation.width
-                            guard abs(dx) > 50, abs(dx) > abs(value.translation.height) else { return }
-                            // swipe-left advances in LTR (and is mirrored under RTL)
-                            turnPage(next: (dx < 0) != rightToLeft, in: loader)
-                        }
-                )
-            )
-            .gesture(
-                SpatialTapGesture().onEnded { value in
-                    guard zoom <= 1.01 else { withAnimation { showChrome.toggle() }; return }
-                    let x = value.location.x
-                    if x > geo.size.width * 0.66 { advance(by: 1, in: loader) }
-                    else if x < geo.size.width * 0.33 { advance(by: -1, in: loader) }
-                    else { withAnimation { showChrome.toggle() } }
-                }
-            )
-            .highPriorityGesture(
-                TapGesture(count: 2).onEnded {
-                    withAnimation(.spring(response: 0.35)) {
-                        if zoom > 1.01 { resetZoom() } else { zoom = 2.5; steadyZoom = 2.5 }
-                    }
+        }
+        // topLeading alignment is load-bearing: the bitmap-sized Image makes the ZStack oversized,
+        // and a default (.center) frame alignment would shift the image's local origin — the
+        // CameraFraming transform assumes local (0,0) sits at the container's top-left corner.
+        .frame(width: size.width, height: size.height, alignment: .topLeading)
+        .clipped()
+        .overlay { if image == nil { ProgressView().tint(Chika.ochre) } }
+        // Reticle framing brackets — always drawn while reading (independent of chrome), crimson.
+        .overlay { if image != nil {
+            Reticle(color: Chika.crimson.opacity(0.45), inset: 6, length: 16, stroke: 2).padding(6)
+        } }
+        // UIKit gesture layer: pinch to zoom (1×–5×), pan when zoomed, tap zones, double-tap to
+        // recenter, and a velocity flick to turn pages — all recognized simultaneously.
+        .overlay {
+            ReaderGestures(
+                onTap: { location, sz in tapZone(x: location.x, width: sz.width, in: loader) },
+                onDoubleTap: { withAnimation(Self.recenterTween) { resetZoom() } },
+                onPinchChanged: { scale in zoom = min(max(steadyZoom * scale, 1), 5) },
+                onPinchEnded: { if zoom <= 1.01 { resetZoom() } else { steadyZoom = zoom } },
+                onPanChanged: { t in
+                    // The comic floats over the background, clamped so it can't be lost off-screen.
+                    let raw = CGSize(width: steadyPan.width + t.width, height: steadyPan.height + t.height)
+                    pan = clampPan(raw, viewSize: size)
+                },
+                onPanEnded: { _, velocity, maxTouches in
+                    endPan(velocity: velocity, maxTouches: maxTouches, in: loader)
                 }
             )
         }
-        .overlay(alignment: .top) { if showChrome { topBar } }
-        .overlay(alignment: .bottom) { if showChrome { bottomBar } }
+    }
+
+    // Top-bar status line, matching Android: "Page X/Y · panel N/M" / "· full page" / "· detecting…".
+    private var pageStatus: String {
+        let prefix = "Page \(page + 1)/\(pageCount) · "
+        if detecting { return prefix + "detecting…" }
+        if onPanel { return prefix + "panel \(step + 1)/\(regions.count)" }
+        return prefix + "full page"
     }
 
     private var topBar: some View {
         HStack(alignment: .center, spacing: 12) {
             Button { dismiss() } label: {
-                Image(systemName: "chevron.left")
+                Image(systemName: "arrow.left")
                     .font(.system(size: 16, weight: .bold))
                     .foregroundColor(Chika.cream)
-                    .frame(width: 34, height: 34)
-                    .background(Chika.inkSoft)
-                    .clipShape(RoundedCornerShape(cornerRadius: 3))
+                    .frame(width: 38, height: 38)
+                    .background(Chika.cream.opacity(0.12))
+                    .clipShape(Circle())
             }
-            VStack(alignment: .leading, spacing: 1) {
-                Text(title).font(.anton(15)).foregroundColor(Chika.cream).lineLimit(1)
-                HStack(spacing: 6) {
-                    // "Whole page" signals the detection-confidence fallback (auto-pan off here).
-                    KickerText(detecting ? "Detecting…" : (regions.count <= 1 ? "Whole page" : "Reading"), size: 8)
-                }
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).font(.archivo(14, weight: 800)).foregroundColor(Chika.cream).lineLimit(1)
+                Text(pageStatus).font(.archivo(9)).tracking(1.4).foregroundColor(Chika.creamMuted)
             }
             Spacer()
-            // Manual split: halve the current region when the detector merged multiple panels.
-            Button { withAnimation(.spring(response: 0.4)) { splitCurrentRegion() } } label: {
-                Image(systemName: "rectangle.split.2x1")
-                    .font(.system(size: 15, weight: .bold))
-                    .foregroundColor(step >= 0 ? Chika.cream : Chika.creamMuted)
-                    .frame(width: 34, height: 34)
-                    .background(Chika.inkSoft)
-                    .clipShape(RoundedCornerShape(cornerRadius: 3))
+            // Show whole page (Android's ZoomOutMap): plain icon, always enabled (no-op on full page).
+            Button { showWholePage() } label: {   // showWholePage runs its own camera tween
+                Image(systemName: "arrow.up.left.and.arrow.down.right")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundColor(Chika.cream)
+                    .frame(width: 38, height: 38)
             }
-            .disabled(step < 0)
-            // Developer panel-box overlay toggle (kept visible for now at user request).
-            Button { debugBoxes.toggle() } label: {
-                Image(systemName: debugBoxes ? "square.dashed.inset.filled" : "square.dashed")
-                    .font(.system(size: 15, weight: .bold))
-                    .foregroundColor(debugBoxes ? Chika.ochre : Chika.cream)
-                    .frame(width: 34, height: 34)
-                    .background(Chika.inkSoft)
-                    .clipShape(RoundedCornerShape(cornerRadius: 3))
-            }
-            Button(rightToLeft ? "RTL" : "LTR") {
+            DirectionChip(rightToLeft: rightToLeft) {
                 rightToLeft.toggle()
                 panelCache.removeAll() // panels are ordered per-direction; re-detect under the new one
                 persist(); redetect()
             }
-                .font(.archivo(12)).foregroundColor(Chika.ink)
-                .padding(.horizontal, 10).padding(.vertical, 5)
-                .background(Chika.ochre)
-                .clipShape(RoundedCornerShape(cornerRadius: 3))
         }
-        .padding(.horizontal, 16).padding(.vertical, 10)
-        .background(Chika.ink.opacity(0.7))
+        .padding(.leading, 12).padding(.trailing, 6).padding(.top, 8).padding(.bottom, 18)
+        // The bar itself sits in the safe area; only its scrim bleeds up behind the status bar.
+        .background(LinearGradient(colors: [Chika.ink.opacity(0.94), .clear],
+                                   startPoint: .top, endPoint: .bottom)
+            .ignoresSafeArea(edges: .top))
     }
 
     private var bottomBar: some View {
-        HStack(alignment: .bottom) {
-            VStack(alignment: .leading, spacing: 2) {
-                KickerText(step < 0 ? "Tap right to step" : "Tap to step · swipe to turn", size: 8)
-                Slider(
-                    value: Binding(
-                        get: { Double(page) },
-                        set: { page = Int($0.rounded()); if case .ready(let a) = state { loadPage(a) } }
-                    ),
-                    in: 0...Double(max(pageCount - 1, 1)), step: 1
-                )
-                .tint(Chika.ochre)
-                .frame(width: 180)
+        VStack(spacing: 0) {
+            HStack {
+                Text("SWIPE TO TURN").font(.anton(12)).tracking(2).foregroundColor(Chika.creamMuted)
+                Spacer()
+                PageCoin(page: (scrubbing ? Int(scrub.rounded()) : page) + 1, total: pageCount)
             }
-            Spacer()
-            // Cycle how tightly panels fill the screen (more padding ↔ edge-to-edge).
-            Button { cycleFill() } label: {
-                VStack(spacing: 1) {
-                    Image(systemName: "arrow.up.left.and.arrow.down.right")
-                        .font(.system(size: 12, weight: .bold))
-                    Text("\(Int((fill * 100).rounded()))").font(.archivo(9))
+            Slider(
+                value: $scrub,
+                in: 0...Double(max(pageCount - 1, 1)),
+                onEditingChanged: { editing in
+                    if editing { scrubbing = true }
+                    else {
+                        scrubbing = false
+                        page = Int(scrub.rounded())
+                        if case .ready(let a) = state { loadPage(a) }
+                    }
                 }
-                .foregroundColor(Chika.cream)
-                .frame(width: 38, height: 38)
-                .background(Chika.inkSoft)
-                .clipShape(RoundedCornerShape(cornerRadius: 3))
-            }
-            .padding(.trailing, 8)
-            PageCoin(page: page + 1, total: pageCount)
+            )
+            .tint(Chika.ochre)
         }
-        .padding(.horizontal, 16).padding(.bottom, 12)
+        .padding(.horizontal, 20).padding(.top, 24).padding(.bottom, 12)
+        // The scrubber sits in the safe area; only its scrim bleeds down behind the home indicator.
+        .background(LinearGradient(colors: [.clear, Chika.ink.opacity(0.97)],
+                                   startPoint: .top, endPoint: .bottom)
+            .ignoresSafeArea(edges: .bottom))
+        // Keep the scrubber in sync with programmatic page changes (taps/flicks) while not scrubbing.
+        .onChange(of: page) { if !scrubbing { scrub = Double($0) } }
     }
 
-    /// Steps through panels, rolling over to the next/previous page at the ends.
+    // Tap zones, matching Android: left third steps back, right third steps forward (panels are
+    // pre-ordered in reading direction, so this is RTL-agnostic), middle third toggles chrome. The
+    // double-tap (recenter) is disambiguated natively by the UIKit tap recognizers, so no defer.
+    private func tapZone(x: CGFloat, width: CGFloat, in loader: PageLoader) {
+        if x < width / 3 { advance(by: -1, in: loader) }
+        else if x > width * 2 / 3 { advance(by: 1, in: loader) }
+        else { withAnimation { showChrome.toggle() } }
+    }
+
+    // Whether the current slot frames the whole page (intro or outro) — a flick only turns pages here.
+    private var isFullPage: Bool { step < 0 || step >= regions.count }
+
+    // End of a one-finger drag: a fast horizontal flick from the whole-page view (intro or outro,
+    // matching Android's isFullPageView) turns the page; otherwise the floated position is committed.
+    private func endPan(velocity: CGSize, maxTouches: Int, in loader: PageLoader) {
+        let isFlick = maxTouches == 1 && isFullPage && zoom <= 1.01
+            && abs(velocity.width) > Self.flickVelocityPxS
+            && abs(velocity.width) > abs(velocity.height) * Self.swipeHorizontalBias
+        if isFlick {
+            // swipe-left advances in LTR (and is mirrored under RTL); loadPage resets pan.
+            turnPage(next: (velocity.width < 0) != rightToLeft, in: loader)
+        } else {
+            steadyPan = pan   // commit the floated / zoomed-pan position
+        }
+    }
+
+    // Clamps free-pan so a floated/zoomed page can't be lost off-screen: horizontal "cover" (never
+    // exposes side background), vertical "float" keeping ≥15% on screen — Android's clampPan ported
+    // onto the same computePageDraw transform (scale about centre, then translate by pan).
+    private func clampPan(_ raw: CGSize, viewSize: CGSize) -> CGSize {
+        guard let image = image else { return raw }
+        let cw = viewSize.width, ch = viewSize.height
+        let draw = CameraTransformKt.computePageDraw(
+            camera: camera,
+            bitmapW: Int32(image.cgImage?.width ?? 1),
+            bitmapH: Int32(image.cgImage?.height ?? 1),
+            containerW: Float(cw), containerH: Float(ch), fill: 0.98)
+        let scaledW = CGFloat(draw.scaledWidth) * zoom
+        let scaledH = CGFloat(draw.scaledHeight) * zoom
+        let baseLeft = cw / 2 + (CGFloat(draw.left) - cw / 2) * zoom
+        let baseTop = ch / 2 + (CGFloat(draw.top) - ch / 2) * zoom
+        let x: CGFloat = scaledW <= cw
+            ? (cw - scaledW) / 2 - baseLeft
+            : min(max(raw.width, cw - scaledW - baseLeft), -baseLeft)
+        let keep = 0.15 * min(scaledH, ch)
+        let y = min(max(raw.height, keep - scaledH - baseTop), ch - keep - baseTop)
+        return CGSize(width: x, height: y)
+    }
+
     private func advance(by delta: Int, in loader: PageLoader) {
         let next = step + delta
-        if next >= regions.count {
+        if next > regions.count {                       // past the whole-page outro → next page intro
             guard page + 1 < loader.pageCount else { return }
-            page += 1; loadPage(loader)
-        } else if next < -1 {
+            page += 1; loadPage(loader, restoreStep: -1)
+        } else if next < -1 {                            // before the whole-page intro → prev page outro
             guard page > 0 else { return }
-            page -= 1; loadPage(loader)
+            page -= 1; loadPage(loader, restoreStep: Self.outroSlot)
         } else {
-            step = next
-            resetZoom()
+            withAnimation(Self.cameraTween) {            // tween the camera like Android (360ms)
+                step = next                              // -1 intro · 0…n-1 panels · n outro
+                resetZoom()
+            }
             persist()
         }
     }
 
-    /// Splits the current framed region in half along its longer screen axis (RTL-aware) — a manual
-    /// workaround for when the detector merges several real panels into one box. The override is
-    /// cached per page so it survives navigation within this comic (session-only, not persisted).
-    private func splitCurrentRegion() {
-        guard step >= 0, step < regions.count, let cg = image?.cgImage else { return }
-        let r = regions[step]
-        let realW = Double(r.width) * Double(cg.width)
-        let realH = Double(r.height) * Double(cg.height)
-        let halves: [Panel]
-        if realW >= realH {
-            let midX = (r.left + r.right) / 2
-            let left = Panel(left: r.left, top: r.top, right: midX, bottom: r.bottom)
-            let right = Panel(left: midX, top: r.top, right: r.right, bottom: r.bottom)
-            halves = rightToLeft ? [right, left] : [left, right]   // reading-first half stays at `step`
-        } else {
-            let midY = (r.top + r.bottom) / 2
-            halves = [Panel(left: r.left, top: r.top, right: r.right, bottom: midY),
-                      Panel(left: r.left, top: midY, right: r.right, bottom: r.bottom)]
+    /// Jumps to the whole-page view (Android's "show whole page" / ZoomOutMap), resetting any zoom.
+    private func showWholePage() {
+        withAnimation(Self.cameraTween) {
+            step = -1
+            resetZoom()
         }
-        var updated = regions
-        updated.replaceSubrange(step...step, with: halves)
-        regions = updated
-        panelCache[page] = updated   // keep the override when returning to this page
-        resetZoom()
         persist()
     }
+}
 
-    /// Cycles how tightly panels fill the screen (more padding ↔ edge-to-edge), persisted globally.
-    private func cycleFill() {
-        let levels = ReadingPrefs.fillLevels
-        let idx = levels.firstIndex(where: { abs($0 - fill) < 0.001 }) ?? levels.count - 1
-        fill = levels[(idx + 1) % levels.count]
-        ReadingPrefs.zoomFill = fill
+/// Frames the page exactly like the shared computePageDraw (contain-fit the camera, fill 0.98),
+/// then layers the user's pinch zoom / pan about the container centre — all as ONE animatable
+/// transform. Because the camera rect itself is the animatable data, SwiftUI tweening it between
+/// panels reproduces Android's `Animatable(camera, PanelConverter)` motion: the framing math runs
+/// on every interpolated camera, not on interpolated screen rects.
+private struct CameraFraming: GeometryEffect {
+    var camL: CGFloat, camT: CGFloat, camR: CGFloat, camB: CGFloat
+    var zoom: CGFloat
+    var panX: CGFloat, panY: CGFloat
+    var container: CGSize
+
+    var animatableData: AnimatablePair<
+        AnimatablePair<AnimatablePair<CGFloat, CGFloat>, AnimatablePair<CGFloat, CGFloat>>,
+        AnimatablePair<CGFloat, AnimatablePair<CGFloat, CGFloat>>
+    > {
+        get {
+            AnimatablePair(
+                AnimatablePair(AnimatablePair(camL, camT), AnimatablePair(camR, camB)),
+                AnimatablePair(zoom, AnimatablePair(panX, panY)))
+        }
+        set {
+            camL = newValue.first.first.first
+            camT = newValue.first.first.second
+            camR = newValue.first.second.first
+            camB = newValue.first.second.second
+            zoom = newValue.second.first
+            panX = newValue.second.second.first
+            panY = newValue.second.second.second
+        }
+    }
+
+    // [size] is the Image's laid-out size: the page bitmap's pixel dimensions.
+    func effectValue(size: CGSize) -> ProjectionTransform {
+        let draw = CameraTransformKt.computePageDraw(
+            camera: Panel(left: Float(camL), top: Float(camT), right: Float(camR), bottom: Float(camB)),
+            bitmapW: Int32(max(size.width, 1)),
+            bitmapH: Int32(max(size.height, 1)),
+            containerW: Float(container.width),
+            containerH: Float(container.height),
+            fill: 0.98
+        )
+        let s = CGFloat(draw.scaledWidth) / max(size.width, 1)
+        let cx = container.width / 2, cy = container.height / 2
+        let left = cx + (CGFloat(draw.left) - cx) * zoom + panX
+        let top = cy + (CGFloat(draw.top) - cy) * zoom + panY
+        return ProjectionTransform(
+            CGAffineTransform(translationX: left, y: top).scaledBy(x: s * zoom, y: s * zoom))
+    }
+}
+
+/// Reading-direction control showing its current state (LTR/RTL) — a translucent cream pill with a
+/// swap icon, matching Android's DirectionChip.
+struct DirectionChip: View {
+    let rightToLeft: Bool
+    let onTap: () -> Void
+
+    var body: some View {
+        Button(action: onTap) {
+            HStack(spacing: 5) {
+                Image(systemName: "arrow.left.arrow.right")
+                    .font(.system(size: 15, weight: .semibold)).foregroundColor(Chika.cream)
+                Text(rightToLeft ? "RTL" : "LTR")
+                    .font(.archivo(11, weight: 700)).tracking(1).foregroundColor(Chika.cream)
+            }
+            .padding(.horizontal, 10).padding(.vertical, 6)
+            .background(Chika.cream.opacity(0.12))
+            .clipShape(Capsule())
+        }
+        .buttonStyle(.plain)
     }
 }
