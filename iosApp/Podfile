@@ -8,5 +8,11 @@ use_frameworks!
 project 'Chika.xcodeproj'
 
 target 'Chika' do
-  pod 'TensorFlowLiteSwift', '2.17.0'
+  # Podspecs are vendored (podspecs/) so pod install never touches the CocoaPods CDN —
+  # raw.githubusercontent.com rate-limits GitHub Actions runners with 429s. The binaries still
+  # come from dl.google.com (TensorFlowLiteC) and the tensorflow git repo (TensorFlowLiteSwift).
+  # TensorFlowLiteC must be listed explicitly: as a transitive dep it would otherwise be
+  # resolved through the CDN.
+  pod 'TensorFlowLiteSwift', :podspec => 'podspecs/TensorFlowLiteSwift.podspec.json'
+  pod 'TensorFlowLiteC', :podspec => 'podspecs/TensorFlowLiteC.podspec.json'
 end
