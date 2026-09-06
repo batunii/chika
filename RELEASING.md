@@ -51,9 +51,12 @@ git push origin v1.0.0
 ```
 
 The workflow then:
-- derives `versionName` from the tag (`v1.0.0` → `1.0.0`) and `versionCode` from the run number,
+- derives `versionName` from the tag (`v1.0.0` → `1.0.0`) and `versionCode` deterministically from
+  it (`MAJOR*10000 + MINOR*100 + PATCH`),
 - builds and **signs** `app-release.aab` and `app-release.apk`,
-- creates a GitHub Release for the tag with auto-generated notes and both files attached.
+- creates a GitHub Release for the tag with auto-generated notes, both files, and the R8
+  `mapping-<version>.txt` attached (upload the mapping to Play alongside the AAB for readable
+  crash stacks).
 
 `workflow_dispatch` is also enabled, so you can run it manually from the Actions tab.
 
@@ -63,5 +66,13 @@ The workflow then:
   **unsigned** APK (debug builds are unaffected). Signing only kicks in when `KEYSTORE_FILE` etc.
   are present (i.e. in CI).
 - For Google Play, prefer the **AAB** and enroll in **Play App Signing**.
-- `isMinifyEnabled` is currently `false`. If you later enable R8 shrinking, verify the ProGuard
-  keep rules still cover the JNI/native libraries (OpenCV, 7-Zip-JBinding, TensorFlow Lite).
+- `isMinifyEnabled` and `isShrinkResources` are **enabled**: release builds go through R8 with the
+  keep rules in `app/proguard-rules.pro` (JNI natives, 7-Zip-JBinding, TFLite/LiteRT). Smoke-test a
+  release build on a device after touching dependencies or the rules.
+- Google Play requires a hosted **privacy policy** URL for every app: use
+  `https://github.com/batunii/chika/blob/main/PRIVACY.md`. The Data Safety form is "no data
+  collected" — the app has no INTERNET permission.
+- Play's 16 KB page-size requirement (targetSdk 35+) is satisfied by 7-Zip-JBinding ≥ 16.02-2.03
+  and LiteRT 1.4.x — both ship 16 KB-aligned `.so`s. Keep that in mind on any dependency change:
+  check with `unzip -p app.apk 'lib/arm64-v8a/*.so' | readelf -lW - | grep LOAD` (align must be
+  0x4000).

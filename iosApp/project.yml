@@ -11,6 +11,14 @@ options:
 settings:
   base:
     SWIFT_VERSION: "5.9"
+    # App Store versioning: CI overrides these per release (see release-ios workflow); the
+    # defaults keep local archives valid. CURRENT_PROJECT_VERSION must increase monotonically
+    # per App Store Connect upload.
+    MARKETING_VERSION: "0.2.1"
+    CURRENT_PROJECT_VERSION: "1"
+    # Automatic signing. Set your Apple Developer Team ID here (Xcode → Settings → Accounts),
+    # or override with xcodebuild DEVELOPMENT_TEAM=XXXXXXXXXX for CI/App Store archives.
+    CODE_SIGN_STYLE: Automatic
 
 packages:
   ZIPFoundation:
@@ -38,12 +46,26 @@ targets:
       path: Sources/Info.plist
       properties:
         CFBundleDisplayName: Chika
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
+        # The app uses no encryption beyond what the OS provides — declares export compliance so
+        # App Store Connect uploads don't stall on the manual questionnaire.
+        ITSAppUsesNonExemptEncryption: false
         UILaunchScreen: {}
         UIAppFonts:
           - Anton-Regular.ttf
           - Archivo-Variable.ttf
+        # Landscape matters for a comic reader (wide panels/spreads); iPad must support all
+        # orientations for App Store review.
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
         LSSupportsOpeningDocumentsInPlace: false
         CFBundleDocumentTypes:
           - CFBundleTypeName: Comic Book Archive
@@ -75,7 +97,10 @@ targets:
         TARGETED_DEVICE_FAMILY: "1,2"
         # $(inherited) keeps the values CocoaPods injects via its xcconfig (needed to link
         # TensorFlowLite) alongside our Kotlin-framework search path / link flag.
-        FRAMEWORK_SEARCH_PATHS:
+        # Both SDK variants are conditional — an unconditional device path would also be passed to
+        # simulator links, and ld picks whichever framework it finds first once both have been
+        # built locally.
+        "FRAMEWORK_SEARCH_PATHS[sdk=iphoneos*]":
           - "$(inherited)"
           - "$(SRCROOT)/../shared/build/bin/iosArm64/releaseFramework"
         "FRAMEWORK_SEARCH_PATHS[sdk=iphonesimulator*]":

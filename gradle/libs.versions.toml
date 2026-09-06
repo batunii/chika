@@ -10,8 +10,11 @@ coroutines = "1.9.0"
 room = "2.7.0-alpha13"
 ksp = "2.2.10-2.0.2"
 commonsCompress = "1.27.1"
-sevenzip = "Release-16.02-2.02"
-tensorflowLite = "2.16.1"
+# 2.03 rebuilds the native lib with 16 KB ELF page alignment (Play requirement for targetSdk 35+)
+sevenzip = "Release-16.02-2.03"
+# LiteRT is the continuation of org.tensorflow:tensorflow-lite (same org.tensorflow.lite package);
+# 1.4.x ships 16 KB-aligned native libs
+litert = "1.4.2"
 documentFile = "1.0.1"
 
 [libraries]
@@ -36,7 +39,7 @@ androidx-room-ktx = { group = "androidx.room", name = "room-ktx", version.ref = 
 androidx-room-compiler = { group = "androidx.room", name = "room-compiler", version.ref = "room" }
 commons-compress = { group = "org.apache.commons", name = "commons-compress", version.ref = "commonsCompress" }
 sevenzip = { group = "com.github.omicronapps", name = "7-Zip-JBinding-4Android", version.ref = "sevenzip" }
-tensorflow-lite = { group = "org.tensorflow", name = "tensorflow-lite", version.ref = "tensorflowLite" }
+tensorflow-lite = { group = "com.google.ai.edge.litert", name = "litert", version.ref = "litert" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

@@ -23,7 +23,7 @@ final class LiteRTPanelDetector {
     /// nil if the bundled model is missing — callers fall back to whole-page reading.
     init?() {
         // QA hook: load an alternate bundled .tflite by name (for model A/B experiments).
-        let modelName = ProcessInfo.processInfo.environment["CHIKA_DEBUG_MODEL"] ?? "manga_panel_detector_int8"
+        let modelName = ChikaDebug.env("CHIKA_DEBUG_MODEL") ?? "manga_panel_detector_int8"
         guard let path = Bundle.main.path(forResource: modelName, ofType: "tflite") else {
             return nil
         }
@@ -63,7 +63,7 @@ final class LiteRTPanelDetector {
             // identical to MlPanelDetector.detect on Android. Android applies NO GutterRefiner and NO
             // PanelReliability gate, so neither runs here.
             // QA hook: bypass the planner to see the model's RAW ordered detections (never set in prod).
-            if ProcessInfo.processInfo.environment["CHIKA_DEBUG_RAW"] != nil {
+            if ChikaDebug.env("CHIKA_DEBUG_RAW") != nil {
                 let ordered = PanelOrdering.shared.order(panels: result.panels, rightToLeft: rightToLeft)
                 return ordered.count < 2 ? [Panel.companion.FULL_PAGE] : ordered
             }

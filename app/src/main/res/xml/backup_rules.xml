@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Only the Room database (library metadata + reading progress) is backed up. Declaring an
+     include makes everything else opt-out by default, which keeps the multi-hundred-MB imported
+     comic copies and generated covers out of the 25 MB cloud-backup quota — they are simply
+     re-imported on a new device. -->
+<full-backup-content>
+    <include domain="database" path="." />
+</full-backup-content>

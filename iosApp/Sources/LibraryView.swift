@@ -95,7 +95,7 @@ struct LibraryView: View {
     /// open that comic's reader. Never set in production, so this is a no-op there.
     private func autoOpenIfDebug() {
         guard openComic == nil,
-              let target = ProcessInfo.processInfo.environment["CHIKA_DEBUG_OPEN"],
+              let target = ChikaDebug.env("CHIKA_DEBUG_OPEN"),
               !library.comics.isEmpty else { return }
         let match = Int(target).flatMap { library.comics.indices.contains($0) ? library.comics[$0] : nil }
             ?? library.comics.first { $0.lastPathComponent.localizedCaseInsensitiveContains(target) }

@@ -50,6 +50,8 @@ import com.chakra.comicreader.ui.theme.InkSoft
 import com.chakra.comicreader.ui.theme.Ochre
 
 private const val DONATION_URL = "https://github.com/batunii/chika"
+private const val PRIVACY_URL = "https://github.com/batunii/chika/blob/main/PRIVACY.md"
+private const val LICENSES_URL = "https://github.com/batunii/chika/blob/main/THIRD_PARTY_NOTICES.md"
 
 @Composable
 fun MenuScreen(
@@ -137,6 +139,15 @@ fun MenuScreen(
                 color = Cream,
             )
 
+            Spacer(Modifier.size(18.dp))
+            LinkRow("Privacy policy — Chika collects no data.") {
+                context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(PRIVACY_URL)))
+            }
+            Spacer(Modifier.size(8.dp))
+            LinkRow("Open-source licenses & notices.") {
+                context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(LICENSES_URL)))
+            }
+
             Spacer(Modifier.size(28.dp))
 
             // ---- Support -------------------------------------------------------------
@@ -181,6 +192,18 @@ fun MenuScreen(
             )
         }
     }
+}
+
+@Composable
+private fun LinkRow(text: String, onClick: () -> Unit) {
+    Text(
+        text,
+        fontFamily = Archivo,
+        fontWeight = FontWeight.SemiBold,
+        fontSize = 12.sp,
+        color = Ochre,
+        modifier = Modifier.clickable(onClick = onClick).padding(vertical = 2.dp),
+    )
 }
 
 @Composable

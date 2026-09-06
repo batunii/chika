@@ -116,20 +116,20 @@ struct ReaderView: View {
             // Reading direction: this comic's saved choice, or the global default if never set.
             rightToLeft = ReadingProgress.readingDirection(comicURL)
             // QA hook: force a direction at launch (never set in production).
-            if let r = ProcessInfo.processInfo.environment["CHIKA_DEBUG_RTL"] { rightToLeft = (r == "1") }
+            if let r = ChikaDebug.env("CHIKA_DEBUG_RTL") { rightToLeft = (r == "1") }
             // Resume where we left off (page and panel), clamped to the current page count.
             if let saved = ReadingProgress.get(comicURL) {
                 page = min(max(saved.page, 0), pageCount - 1)
             }
             // QA hook: jump straight to a page (never set in production).
-            if let p = ProcessInfo.processInfo.environment["CHIKA_DEBUG_PAGE"], let pi = Int(p) {
+            if let p = ChikaDebug.env("CHIKA_DEBUG_PAGE"), let pi = Int(p) {
                 page = min(max(pi, 0), pageCount - 1)
             }
             state = .ready(loader)
             ReadingProgress.markOpened(comicURL)   // bump recency so it sorts to the top of the library
             // QA hook: start on a specific panel index (never set in production).
             var restore = ReadingProgress.get(comicURL)?.step ?? -1
-            if let s = ProcessInfo.processInfo.environment["CHIKA_DEBUG_STEP"], let si = Int(s) { restore = si }
+            if let s = ChikaDebug.env("CHIKA_DEBUG_STEP"), let si = Int(s) { restore = si }
             loadPage(loader, restoreStep: restore)
         } catch {
             state = .failed("Could not open archive: \(error.localizedDescription)")

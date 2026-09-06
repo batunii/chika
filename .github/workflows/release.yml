@@ -53,6 +53,13 @@ jobs:
           chmod +x ./gradlew
           ./gradlew :app:bundleRelease :app:assembleRelease --stacktrace
 
+      # R8 is enabled, so keep the deobfuscation map with every release — Play crash
+      # reports (and any bug report against this build) are unreadable without it.
+      - name: Package R8 mapping
+        run: |
+          cp app/build/outputs/mapping/release/mapping.txt \
+             "mapping-${{ steps.ver.outputs.name }}.txt"
+
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
@@ -63,3 +70,4 @@ jobs:
           files: |
             app/build/outputs/bundle/release/*.aab
             app/build/outputs/apk/release/*.apk
+            mapping-*.txt
