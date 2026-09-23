@@ -6,6 +6,12 @@ Updated 23 September 2026. Target: **iPhone and iPad App Store**. Fill the blank
 
 Chika's Apple target is an **iOS/iPadOS app**. Apple does not use a separate notarization submission ID for this route. The developers must create an **Apple Distribution signed archive**, upload it to **App Store Connect**, complete the product page and compliance forms, and submit it for **App Review**. A `notarytool` submission ID applies to Developer ID signed **macOS software distributed outside the Mac App Store**. It cannot sign or approve this iOS build.
 
+## Build prepared on 23 September 2026
+
+A local Release archive and **App Store signed IPA** were exported successfully for bundle ID `com.chakra.comicreader`, version `0.2.1`, build `1`. Xcode used a cloud managed Apple Distribution certificate and an iOS Team Store provisioning profile. The IPA's app code signature was verified after export. The IPA and archive are held outside the Git repository for separate handoff. IPA SHA-256: `06cdf9483f5368e9dd96881f42d76f53da7943fe80cbc38bdae8dcf6de68a2d4`.
+
+This build has **not** been uploaded to App Store Connect or submitted for review. Confirm the final version/build number and complete the fields below before upload.
+
 ## Product and account details to confirm
 
 | Field | Fill in or confirm | Notes |
