@@ -21,6 +21,18 @@
 				<string>CA92.1</string>
 			</array>
 		</dict>
+		<!-- stat/fstat/lstat are linked into the app binary by the statically linked libarchive
+		     (CBR import), which ships no privacy manifest of its own. It reads size/metadata of the
+		     archive the user picked (3B52.1) and of copies in the app container (C617.1). -->
+		<dict>
+			<key>NSPrivacyAccessedAPIType</key>
+			<string>NSPrivacyAccessedAPICategoryFileTimestamp</string>
+			<key>NSPrivacyAccessedAPITypeReasons</key>
+			<array>
+				<string>C617.1</string>
+				<string>3B52.1</string>
+			</array>
+		</dict>
 	</array>
 </dict>
 </plist>
