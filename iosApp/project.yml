@@ -51,6 +51,8 @@ targets:
         # The app uses no encryption beyond what the OS provides — declares export compliance so
         # App Store Connect uploads don't stall on the manual questionnaire.
         ITSAppUsesNonExemptEncryption: false
+        # Mac App Store category (ignored on iOS).
+        LSApplicationCategoryType: public.app-category.books
         UILaunchScreen: {}
         UIAppFonts:
           - Anton-Regular.ttf
@@ -66,7 +68,9 @@ targets:
           - UIInterfaceOrientationPortraitUpsideDown
           - UIInterfaceOrientationLandscapeLeft
           - UIInterfaceOrientationLandscapeRight
-        LSSupportsOpeningDocumentsInPlace: false
+        # macOS rejects NO here. The app never handles files opened from outside (imports only via
+        # its own file picker), so YES changes no behavior on either platform.
+        LSSupportsOpeningDocumentsInPlace: true
         CFBundleDocumentTypes:
           - CFBundleTypeName: Comic Book Archive
             LSHandlerRank: Alternate
@@ -95,9 +99,16 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.chakra.comicreader
         TARGETED_DEVICE_FAMILY: "1,2"
-        # $(inherited) keeps the values CocoaPods injects via its xcconfig (needed to link
-        # TensorFlowLite) alongside our Kotlin-framework search path / link flag.
-        # Both SDK variants are conditional — an unconditional device path would also be passed to
+        # Mac Catalyst: the same app on the Mac, sharing the iOS bundle ID so it's one App Store
+        # record (universal purchase). Apple silicon only — the Kotlin framework is built for
+        # macosArm64 (see scripts/build-shared.sh). "Designed for iPad" is off: Catalyst replaces it.
+        SUPPORTS_MACCATALYST: YES
+        DERIVE_MACCATALYST_PRODUCT_BUNDLE_IDENTIFIER: NO
+        SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD: NO
+        "ARCHS[sdk=macosx*]": arm64
+        # The Mac App Store requires the App Sandbox; iOS is sandboxed by the OS and needs no file.
+        "CODE_SIGN_ENTITLEMENTS[sdk=macosx*]": Chika-macOS.entitlements
+        # All SDK variants are conditional — an unconditional device path would also be passed to
         # simulator links, and ld picks whichever framework it finds first once both have been
         # built locally.
         "FRAMEWORK_SEARCH_PATHS[sdk=iphoneos*]":
@@ -106,19 +117,16 @@ targets:
         "FRAMEWORK_SEARCH_PATHS[sdk=iphonesimulator*]":
           - "$(inherited)"
           - "$(SRCROOT)/../shared/build/bin/iosSimulatorArm64/releaseFramework"
+        "FRAMEWORK_SEARCH_PATHS[sdk=macosx*]":
+          - "$(inherited)"
+          - "$(SRCROOT)/../shared/build/bin/macCatalystArm64/releaseFramework"
         OTHER_LDFLAGS:
           - "$(inherited)"
           - "-framework"
           - "ChikaShared"
     preBuildScripts:
       - name: Build Kotlin shared framework
-        script: |
-          cd "$SRCROOT/.."
-          if [ "$PLATFORM_NAME" = "iphonesimulator" ]; then
-            ./gradlew :shared:linkReleaseFrameworkIosSimulatorArm64
-          else
-            ./gradlew :shared:linkReleaseFrameworkIosArm64
-          fi
+        script: exec "$SRCROOT/scripts/build-shared.sh"
         basedOnDependencyAnalysis: false
 
 schemes:

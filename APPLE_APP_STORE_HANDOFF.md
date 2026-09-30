@@ -60,16 +60,23 @@ This build has **not** been uploaded to App Store Connect or submitted for revie
 
 - [ ] Confirm the App Store Connect app record and register the explicit `com.chakra.comicreader` App ID.
 - [ ] Use current Xcode and an iOS SDK accepted by App Store Connect. This checkout targets iOS 16.0 and later.
-- [ ] Generate the Xcode project, install CocoaPods dependencies, and build the Kotlin shared framework.
+- [ ] Generate the Xcode project (`xcodegen generate --spec iosApp/project.yml --project iosApp`). The Kotlin shared framework builds automatically in Xcode's pre-build phase; a JDK 17 must be installed. There are no CocoaPods dependencies.
 - [ ] Confirm the 1024×1024 App Store icon is fully opaque, all bundled assets are licensed, and the final privacy manifest covers the app and SDKs.
 - [ ] Set the release version/build number, enable **Apple Distribution** signing (automatic signing is acceptable), and create a Release `.xcarchive`.
 - [ ] Validate the archive, upload to App Store Connect, and resolve all upload/processing errors. The existing GitHub `release-ios.yml` creates an **unsigned sideloading IPA** and is not an App Store upload workflow.
 - [ ] Test the processed build through TestFlight on at least one iPhone and one iPad. Exercise CBZ and CBR import, reading, panel detection, progress, orientation, and offline behavior.
 - [ ] Upload screenshots, complete every product-page and compliance field above, then submit for App Review.
 
-## If a separate Mac release is requested later
+## Mac release (Mac Catalyst)
 
-This repository has no macOS app target. Direct Mac distribution would require a macOS build signed with a **Developer ID Application** certificate, Hardened Runtime, a secure timestamp, and a notarization upload (ZIP, DMG, or installer package). `notarytool` can authenticate using an Apple ID, app-specific password, and team ID, or an App Store Connect API key. Apple returns a new submission ID after each upload. These Mac steps do **not** replace the iOS App Store process.
+The same Xcode target also builds a Mac app via **Mac Catalyst** (Apple silicon Macs only, macOS 13 or later). It uses the iOS bundle ID `com.chakra.comicreader`, so it's the same App Store Connect record: add the **macOS** platform to that app and the purchase is universal. Mac-specific steps:
+
+- [ ] In Xcode, archive with the destination **Any Mac (Mac Catalyst)** and upload it like the iOS build. Mac builds need their own **Mac App Store** provisioning profile; automatic signing creates it.
+- [ ] The Mac build is sandboxed (`iosApp/Chika-macOS.entitlements`: App Sandbox and read access to files the user picks). Confirm importing a CBZ/CBR from Finder works in the TestFlight Mac build.
+- [ ] Upload Mac screenshots (16:10, e.g. 2880×1800), and confirm the **Books** category and privacy answers apply to the Mac.
+- [ ] Mac builds share the version with iOS but each upload needs a new build number.
+
+Distributing **outside** the Mac App Store would instead need a **Developer ID Application** signature, Hardened Runtime, and notarization with `notarytool`. That's a separate route, not needed for the App Store.
 
 ## Apple references
 

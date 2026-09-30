@@ -13,7 +13,7 @@ Chika depends on or bundles, along with the obligations each imposes. Full licen
 | Apache Commons Compress | Apache-2.0 | yes | Keep license + NOTICE |
 | TensorFlow Lite (`org.tensorflow:tensorflow-lite`) | Apache-2.0 | yes (native `.so`) | Keep license |
 | **7-Zip-JBinding-4Android** | **LGPL-2.1** (+ unRAR, BSD parts) | yes (native `.so`) | See LGPL note below |
-| Panel-detection model (`manga_panel_detector_int8.tflite`) | Apache-2.0 | yes (asset) | Disclose Manga109-s training data |
+| Panel-detection model (`manga_panel_detector_int8.tflite` on Android, `MangaPanelDetector.mlpackage` on Apple) | Apache-2.0 | yes (asset) | Disclose Manga109-s training data |
 | Anton font | OFL-1.1 | yes (asset) | Keep OFL text; don't sell font alone |
 | Archivo font | OFL-1.1 | yes (asset) | Keep OFL text; don't sell font alone |
 
@@ -61,6 +61,9 @@ Full texts: [`THIRD_PARTY_LICENSES/OFL-1.1-Anton.txt`](THIRD_PARTY_LICENSES/OFL-
 - **`manga_panel_detector_int8.tflite`** — from
   [`leoxs22/manga-panel-detector-yolo26n`](https://huggingface.co/leoxs22/manga-panel-detector-yolo26n),
   released under **Apache-2.0**. It detects panels (class 0) and text balloons (class 1).
+- **`MangaPanelDetector.mlpackage`** (iOS, iPadOS, Mac) — the same model's upstream FP32 weights
+  (`manga_panel_detector_fp32.pt`) converted to Core ML by `training/scripts/export_coreml.py`. Same
+  weights, same license and training-data disclosure as the `.tflite`.
 - The model was **trained on the Manga109-s dataset**. Per the dataset terms, commercial use of the
   model's outputs is permitted provided dataset usage is disclosed — **this notice constitutes that
   disclosure**. See http://www.manga109.org/ for dataset terms.

@@ -53,12 +53,9 @@ jobs:
           /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${GITHUB_RUN_NUMBER}" "$PLIST"
           echo "Stamped $PLIST → version ${VER} (build ${GITHUB_RUN_NUMBER})"
 
-      - name: Install pods
-        run: cd iosApp && pod install
-
       - name: Build app (unsigned)
         run: |
-          xcodebuild -workspace iosApp/Chika.xcworkspace -scheme Chika -configuration Release \
+          xcodebuild -project iosApp/Chika.xcodeproj -scheme Chika -configuration Release \
             -sdk iphoneos -derivedDataPath iosApp/build \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build
 

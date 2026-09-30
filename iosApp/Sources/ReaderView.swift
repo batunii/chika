@@ -15,7 +15,7 @@ struct ReaderView: View {
         case ready(PageLoader)
     }
 
-    private static let detector = LiteRTPanelDetector()
+    private static let detector = CoreMLPanelDetector()
     private static let ioQueue = DispatchQueue(label: "chika.reader.io", qos: .userInitiated)
     private static let detectQueue = DispatchQueue(label: "chika.reader.detect", qos: .userInitiated)
 

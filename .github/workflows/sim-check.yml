@@ -37,12 +37,9 @@ jobs:
       - name: Generate Xcode project
         run: xcodegen generate --spec iosApp/project.yml --project iosApp
 
-      - name: Install pods
-        run: cd iosApp && pod install
-
       - name: Build app (simulator)
         run: |
-          xcodebuild -workspace iosApp/Chika.xcworkspace -scheme Chika -configuration Debug \
+          xcodebuild -project iosApp/Chika.xcodeproj -scheme Chika -configuration Debug \
             -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' \
             -derivedDataPath iosApp/build ARCHS=arm64 \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build

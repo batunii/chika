@@ -12,7 +12,9 @@ kotlin {
             jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
         }
     }
-    listOf(iosArm64(), iosSimulatorArm64()).forEach { target ->
+    // macosArm64 exists only to feed Mac Catalyst: Kotlin/Native has no Catalyst target, so the
+    // Xcode build retags this macOS framework's objects as Catalyst (iosApp/scripts/build-shared.sh).
+    listOf(iosArm64(), iosSimulatorArm64(), macosArm64()).forEach { target ->
         target.binaries.framework {
             baseName = "ChikaShared"
             isStatic = true
