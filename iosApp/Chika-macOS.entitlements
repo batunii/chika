@@ -4,8 +4,9 @@
 <dict>
 	<key>com.apple.security.app-sandbox</key>
 	<true/>
-	<!-- The library imports comics the user picks in the file dialog (copied into app storage). -->
-	<key>com.apple.security.files.user-selected.read-only</key>
+	<!-- Catalyst's document picker issues read/write sandbox extensions for user-picked files.
+	     Chika only reads those files and copies them into its own library. -->
+	<key>com.apple.security.files.user-selected.read-write</key>
 	<true/>
 </dict>
 </plist>

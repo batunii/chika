@@ -68,11 +68,11 @@ targets:
           - UIInterfaceOrientationPortraitUpsideDown
           - UIInterfaceOrientationLandscapeLeft
           - UIInterfaceOrientationLandscapeRight
-        # macOS rejects NO here. The app never handles files opened from outside (imports only via
-        # its own file picker), so YES changes no behavior on either platform.
+        # Required by the macOS document picker; Chika copies opened files into its own library.
         LSSupportsOpeningDocumentsInPlace: true
         CFBundleDocumentTypes:
           - CFBundleTypeName: Comic Book Archive
+            CFBundleTypeRole: Viewer
             LSHandlerRank: Alternate
             LSItemContentTypes:
               - com.chakra.comicreader.cbz

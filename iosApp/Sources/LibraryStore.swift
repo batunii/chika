@@ -12,6 +12,9 @@ final class LibraryStore: ObservableObject {
     @Published var importError: String?
 
     private let dir: URL
+    #if targetEnvironment(macCatalyst)
+    private var activeMacImports = 0
+    #endif
 
     /// Types the file importer allows. Includes the app's exported CBZ/CBR types plus the generic
     /// zip/archive/rar families so a plain .zip or .rar comic is selectable too.
@@ -20,6 +23,15 @@ final class LibraryStore: ObservableObject {
         if let cbz = UTType("com.chakra.comicreader.cbz") { types.append(cbz) }
         if let cbr = UTType("com.chakra.comicreader.cbr") { types.append(cbr) }
         if let rar = UTType("com.rarlab.rar-archive") { types.append(rar) }
+        #if targetEnvironment(macCatalyst)
+        // macOS may associate these extensions with types declared by another installed reader.
+        for ext in ["cbz", "cbr", "rar"] {
+            if let type = UTType(filenameExtension: ext), !types.contains(type) { types.append(type) }
+        }
+        // Catalyst's native picker can reject its own custom archive types. The Mac fallback
+        // permits file selection; importMacComic validates the archive before adding it.
+        types.append(.data)
+        #endif
         return types
     }
 
@@ -43,6 +55,9 @@ final class LibraryStore: ObservableObject {
     }
 
     func importComic(from url: URL) {
+        #if targetEnvironment(macCatalyst)
+        importMacComic(from: url)
+        #else
         // .fileImporter hands back security-scoped URLs (NOT owned copies). Open the scope, copy
         // synchronously into our sandbox, then relinquish it. Never move — we don't own the source.
         let scoped = url.startAccessingSecurityScopedResource()
@@ -88,7 +103,68 @@ final class LibraryStore: ObservableObject {
             }
             refresh()
         }
+        #endif
     }
+
+    #if targetEnvironment(macCatalyst)
+    private enum MacImportError: LocalizedError {
+        case unsupported, noImages
+        var errorDescription: String? {
+            switch self {
+            case .unsupported: return "Choose a CBZ, CBR, ZIP, or RAR comic archive."
+            case .noImages: return "No image pages found in this archive."
+            }
+        }
+    }
+
+    /// Stage and validate off the main thread. A failed import must not erase an existing comic.
+    private func importMacComic(from url: URL) {
+        activeMacImports += 1
+        importing = true
+        let destination = dir.appendingPathComponent(url.deletingPathExtension().lastPathComponent + ".cbz")
+        Task {
+            do {
+                try await Task.detached(priority: .userInitiated) {
+                    let fm = FileManager.default
+                    let scoped = url.startAccessingSecurityScopedResource()
+                    defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+                    let staging = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+                    try fm.createDirectory(at: staging, withIntermediateDirectories: true)
+                    defer { try? fm.removeItem(at: staging) }
+                    let source = staging.appendingPathComponent("source").appendingPathExtension(url.pathExtension)
+                    var coordinationError: NSError?
+                    var copyError: Error?
+                    NSFileCoordinator().coordinate(readingItemAt: url, options: .withoutChanges, error: &coordinationError) { readableURL in
+                        do { try fm.copyItem(at: readableURL, to: source) }
+                        catch { copyError = error }
+                    }
+                    if let error = coordinationError ?? copyError { throw error }
+                    let format = ComicFormatDetector.shared.detect(head: Self.leadingBytes(of: source), fileExtension: url.pathExtension)
+                    let ready = staging.appendingPathComponent("ready.cbz")
+                    if format == .cbr {
+                        try await CbrConverter.convertToCbz(source: source, destination: ready)
+                    } else if format == .cbz {
+                        try fm.moveItem(at: source, to: ready)
+                    } else {
+                        throw MacImportError.unsupported
+                    }
+                    guard try CbzArchive(url: ready).pageCount > 0 else { throw MacImportError.noImages }
+                    if fm.fileExists(atPath: destination.path) {
+                        _ = try fm.replaceItemAt(destination, withItemAt: ready)
+                    } else {
+                        try fm.moveItem(at: ready, to: destination)
+                    }
+                }.value
+                ReadingProgress.markOpened(destination)
+            } catch {
+                importError = "Couldn't import \(url.lastPathComponent): \(error.localizedDescription)"
+            }
+            activeMacImports -= 1
+            importing = activeMacImports > 0
+            refresh()
+        }
+    }
+    #endif
 
     func delete(_ url: URL) {
         try? FileManager.default.removeItem(at: url)
@@ -98,7 +174,7 @@ final class LibraryStore: ObservableObject {
 
     /// The first few bytes of [url] as a Kotlin byte array, for shared magic-byte format detection.
     /// Returns empty (→ extension fallback) if the file can't be read.
-    private static func leadingBytes(of url: URL, count: Int = 8) -> KotlinByteArray {
+    nonisolated private static func leadingBytes(of url: URL, count: Int = 8) -> KotlinByteArray {
         let data: Data = {
             guard let handle = try? FileHandle(forReadingFrom: url) else { return Data() }
             defer { try? handle.close() }
