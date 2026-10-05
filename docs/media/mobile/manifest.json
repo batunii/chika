@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "width": 288,
+  "height": 512,
+  "fps": 24.0,
+  "frameCount": 192,
+  "columns": 4,
+  "rows": 4,
+  "decodedBytes": 113246208,
+  "poster": "poster.webp",
+  "still": "still.webp",
+  "sheets": [
+    "sheet-001.webp",
+    "sheet-002.webp",
+    "sheet-003.webp",
+    "sheet-004.webp",
+    "sheet-005.webp",
+    "sheet-006.webp",
+    "sheet-007.webp",
+    "sheet-008.webp",
+    "sheet-009.webp",
+    "sheet-010.webp",
+    "sheet-011.webp",
+    "sheet-012.webp"
+  ]
+}
