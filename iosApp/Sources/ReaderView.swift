@@ -65,6 +65,13 @@ struct ReaderView: View {
     private var onPanel: Bool { step >= 0 && step < regions.count }
 
     private var isReady: Bool { if case .ready = state { return true }; return false }
+    private var chromeVisible: Bool {
+        #if targetEnvironment(macCatalyst)
+        return true
+        #else
+        return showChrome
+        #endif
+    }
 
     var body: some View {
         // Only the page canvas escapes the safe area (full-bleed, origin-0, like Android's
@@ -93,15 +100,28 @@ struct ReaderView: View {
             }
         }
         .overlay(alignment: .top) {
-            if showChrome && isReady {
+            if chromeVisible && isReady {
                 topBar.transition(.move(edge: .top).combined(with: .opacity))
             }
         }
         .overlay(alignment: .bottom) {
-            if showChrome && isReady && pageCount > 1 {
+            if chromeVisible && isReady && pageCount > 1 {
                 bottomBar.transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
+        #if targetEnvironment(macCatalyst)
+        .overlay(alignment: .topLeading) {
+            if !isReady {
+                Button { dismiss() } label: {
+                    Label("Library", systemImage: "arrow.left")
+                        .font(.archivo(14)).foregroundColor(Chika.cream)
+                        .padding(16)
+                }
+                .buttonStyle(.plain)
+                .keyboardShortcut(.escape, modifiers: [])
+            }
+        }
+        #endif
         .navigationBarHidden(true)
         .statusBarHidden(!showChrome)
         .task { load() }
@@ -296,11 +316,27 @@ struct ReaderView: View {
                     .background(Chika.cream.opacity(0.12))
                     .clipShape(Circle())
             }
+            #if targetEnvironment(macCatalyst)
+            .keyboardShortcut(.escape, modifiers: [])
+            .accessibilityLabel("Back to library")
+            #endif
             VStack(alignment: .leading, spacing: 2) {
                 Text(title).font(.archivo(14, weight: 800)).foregroundColor(Chika.cream).lineLimit(1)
                 Text(pageStatus).font(.archivo(9)).tracking(1.4).foregroundColor(Chika.creamMuted)
             }
             Spacer()
+            #if targetEnvironment(macCatalyst)
+            Button { if case .ready(let loader) = state { advance(by: -1, in: loader) } } label: {
+                Image(systemName: "chevron.left").foregroundColor(Chika.cream).frame(width: 36, height: 38)
+            }
+            .help("Previous panel (Left Arrow)")
+            .accessibilityLabel("Previous panel")
+            Button { if case .ready(let loader) = state { advance(by: 1, in: loader) } } label: {
+                Image(systemName: "chevron.right").foregroundColor(Chika.cream).frame(width: 36, height: 38)
+            }
+            .help("Next panel (Right Arrow)")
+            .accessibilityLabel("Next panel")
+            #endif
             // Show whole page (Android's ZoomOutMap): plain icon, always enabled (no-op on full page).
             Button { showWholePage() } label: {   // showWholePage runs its own camera tween
                 Image(systemName: "arrow.up.left.and.arrow.down.right")
@@ -308,6 +344,10 @@ struct ReaderView: View {
                     .foregroundColor(Chika.cream)
                     .frame(width: 38, height: 38)
             }
+            #if targetEnvironment(macCatalyst)
+            .keyboardShortcut("0", modifiers: .command)
+            .accessibilityLabel("Show whole page")
+            #endif
             DirectionChip(rightToLeft: rightToLeft) {
                 rightToLeft.toggle()
                 panelCache.removeAll() // panels are ordered per-direction; re-detect under the new one
@@ -324,7 +364,11 @@ struct ReaderView: View {
     private var bottomBar: some View {
         VStack(spacing: 0) {
             HStack {
+                #if targetEnvironment(macCatalyst)
+                Text("ARROW KEYS TO READ").font(.anton(12)).tracking(2).foregroundColor(Chika.creamMuted)
+                #else
                 Text("SWIPE TO TURN").font(.anton(12)).tracking(2).foregroundColor(Chika.creamMuted)
+                #endif
                 Spacer()
                 PageCoin(page: (scrubbing ? Int(scrub.rounded()) : page) + 1, total: pageCount)
             }

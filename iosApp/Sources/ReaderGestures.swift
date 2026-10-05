@@ -19,7 +19,12 @@ struct ReaderGestures: UIViewRepresentable {
     var onPanEnded: (_ translation: CGSize, _ velocity: CGSize, _ maxTouches: Int) -> Void
 
     func makeUIView(context: Context) -> UIView {
+        #if targetEnvironment(macCatalyst)
+        let view = MacGestureView()
+        view.coordinator = context.coordinator
+        #else
         let view = UIView()
+        #endif
         view.backgroundColor = .clear
         let c = context.coordinator
 
@@ -42,6 +47,35 @@ struct ReaderGestures: UIViewRepresentable {
     }
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
+
+    #if targetEnvironment(macCatalyst)
+    /// Arrow keys normally go to UIKit's focus navigation. Keep them on the reading canvas.
+    private final class MacGestureView: UIView {
+        weak var coordinator: Coordinator?
+        override var canBecomeFirstResponder: Bool { true }
+
+        override func didMoveToWindow() {
+            super.didMoveToWindow()
+            if window != nil { becomeFirstResponder() }
+        }
+
+        override var keyCommands: [UIKeyCommand]? {
+            let previous = UIKeyCommand(input: UIKeyCommand.inputLeftArrow, modifierFlags: [], action: #selector(previousPanel))
+            let next = UIKeyCommand(input: UIKeyCommand.inputRightArrow, modifierFlags: [], action: #selector(nextPanel))
+            previous.wantsPriorityOverSystemBehavior = true
+            next.wantsPriorityOverSystemBehavior = true
+            return [previous, next]
+        }
+
+        @objc private func previousPanel() {
+            coordinator?.parent.onTap(CGPoint(x: 0, y: bounds.midY), bounds.size)
+        }
+
+        @objc private func nextPanel() {
+            coordinator?.parent.onTap(CGPoint(x: bounds.width, y: bounds.midY), bounds.size)
+        }
+    }
+    #endif
 
     final class Coordinator: NSObject, UIGestureRecognizerDelegate {
         var parent: ReaderGestures
