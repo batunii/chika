@@ -190,6 +190,13 @@ struct ComicCard: View {
     private var lastPage: Int { progress?.page ?? 0 }
     private var pageCount: Int { progress?.total ?? pages }
     private var started: Bool { lastPage > 0 }
+    #if targetEnvironment(macCatalyst)
+    private let titleSize: CGFloat = 15
+    private let detailSize: CGFloat = 12
+    #else
+    private let titleSize: CGFloat = 12
+    private let detailSize: CGFloat = 9.5
+    #endif
     // Android's fill formula: (lastPage + 1) / pageCount — page 0 already counts as "on page 1".
     private var pct: Double { pageCount > 0 ? min(max(Double(lastPage + 1) / Double(pageCount), 0), 1) : 0 }
 
@@ -222,14 +229,14 @@ struct ComicCard: View {
             .comicShadow(offset: 5, color: .black.opacity(0.70), corner: 4)
 
             Text(title)
-                .font(.archivo(12, weight: 800)).foregroundColor(Chika.cream)
+                .font(.archivo(titleSize, weight: 800)).foregroundColor(Chika.cream)
                 .lineLimit(2).multilineTextAlignment(.leading)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.top, 9)
             Text(started
                  ? "\(Int(pct * 100))% · pg \(lastPage + 1)/\(pageCount)"
                  : "\(pageCount) pages")
-                .font(.archivo(9.5)).foregroundColor(Chika.creamMuted)
+                .font(.archivo(detailSize)).foregroundColor(Chika.creamMuted)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.top, 2)
         }
