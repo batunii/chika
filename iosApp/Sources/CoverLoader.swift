@@ -8,6 +8,12 @@ enum CoverLoader {
     private static let cache = NSCache<NSURL, UIImage>()
     private static let countCache = NSCache<NSURL, NSNumber>()
 
+    /// Forgets a comic's cached cover/page count (call when its file is replaced or deleted).
+    static func invalidate(_ url: URL) {
+        cache.removeObject(forKey: url as NSURL)
+        countCache.removeObject(forKey: url as NSURL)
+    }
+
     /// Loads a comic's cover thumbnail (page 0) AND its page count in a single archive open, both
     /// cached. Page count feeds the library's "N pages" label for unread comics (Android parity).
     static func load(for url: URL) async -> (cover: UIImage?, pageCount: Int) {

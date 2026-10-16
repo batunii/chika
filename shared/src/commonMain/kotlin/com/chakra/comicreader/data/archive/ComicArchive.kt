@@ -14,9 +14,6 @@ interface ComicArchive : AutoCloseable {
 
     /** Raw encoded bytes (JPEG/PNG/WebP/…) of the page at [index]. */
     fun readPage(index: Int): ByteArray
-
-    /** The archive entry name for [index], useful for debugging/logging. */
-    fun pageName(index: Int): String
 }
 
 /** File extensions we treat as comic page images. */

@@ -44,6 +44,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -133,7 +134,12 @@ fun ReaderScreen(
             .background(MaterialTheme.colorScheme.background),
     ) {
         when {
-            state.error != null -> ErrorView(state.error!!)
+            state.error != null -> ErrorView(
+                message = state.error!!,
+                canNavigate = state.pageCount > 1,
+                onPrev = viewModel::previousPage,
+                onNext = viewModel::nextPage,
+            )
             state.page == null -> LoadingView()
             else -> PageViewer(
                 state = state,
@@ -429,13 +435,21 @@ private fun LoadingView() {
 }
 
 @Composable
-private fun ErrorView(message: String) {
+private fun ErrorView(message: String, canNavigate: Boolean, onPrev: () -> Unit, onNext: () -> Unit) {
     Box(Modifier.fillMaxSize().padding(32.dp), contentAlignment = Alignment.Center) {
-        Text(
-            text = message,
-            color = MaterialTheme.colorScheme.error,
-            style = MaterialTheme.typography.bodyLarge,
-        )
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(
+                text = message,
+                color = MaterialTheme.colorScheme.error,
+                style = MaterialTheme.typography.bodyLarge,
+            )
+            if (canNavigate) {
+                Row(Modifier.padding(top = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    TextButton(onClick = onPrev) { Text("Previous page") }
+                    TextButton(onClick = onNext) { Text("Next page") }
+                }
+            }
+        }
     }
 }
 

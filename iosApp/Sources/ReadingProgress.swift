@@ -19,20 +19,11 @@ struct Progress: Codable, Equatable {
 /// matching Android's behaviour.
 enum ReadingPrefs {
     private static let directionKey = "chika.readingDirection.default.rtl"
-    private static let fillKey = "chika.zoomFill"
     private static let defaults = UserDefaults.standard
 
     static var defaultRightToLeft: Bool {
         get { defaults.bool(forKey: directionKey) }
         set { defaults.set(newValue, forKey: directionKey) }
-    }
-
-    /// How tightly a framed panel fills the screen (1.0 = edge-to-edge, lower = more padding).
-    /// 0.98 is the cross-platform default; the reader lets the user cycle this for taste.
-    static let fillLevels: [Float] = [0.86, 0.92, 0.98, 1.0]
-    static var zoomFill: Float {
-        get { let v = defaults.float(forKey: fillKey); return v == 0 ? 0.98 : v }
-        set { defaults.set(newValue, forKey: fillKey) }
     }
 }
 

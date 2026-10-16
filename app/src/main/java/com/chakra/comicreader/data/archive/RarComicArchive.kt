@@ -50,8 +50,6 @@ class RarComicArchive(file: File) : ComicArchive {
         return out.toByteArray()
     }
 
-    override fun pageName(index: Int): String = entries[index].second
-
     override fun close() {
         runCatching { inArchive.close() }
         runCatching { randomAccessFile.close() }

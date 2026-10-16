@@ -17,7 +17,9 @@ final class LiteRTPanelDetector {
     // (conf 0.08 / containment 0.9) recovered ZERO extra panels on dynamic manga layouts: this
     // end-to-end model emits high-confidence panels or nothing, so missed borderless panels are a
     // model-training limitation, not a threshold one. Improving them needs a retrained model.
-    private let decoder = YoloPanelDecoder.companion.default()
+    // The input size is read from the model's input tensor (as Android does), so swapping in a model
+    // exported at another resolution adapts instead of failing every inference silently.
+    private let decoder: YoloPanelDecoder
     private var inputSize: Int { Int(decoder.inputSize) }
 
     /// nil if the bundled model is missing — callers fall back to whole-page reading.
@@ -31,6 +33,16 @@ final class LiteRTPanelDetector {
             let interpreter = try Interpreter(modelPath: path)
             try interpreter.allocateTensors()
             self.interpreter = interpreter
+            let dims = try interpreter.input(at: 0).shape.dimensions   // NHWC: [1, H, W, 3]
+            let size = dims.count == 4 ? dims[1] : Int(YoloPanelDecoder.companion.DEFAULT_INPUT_SIZE)
+            let k = YoloPanelDecoder.companion
+            self.decoder = YoloPanelDecoder(
+                inputSize: Int32(size),
+                confidenceThreshold: k.DEFAULT_CONFIDENCE,
+                nmsIoU: k.DEFAULT_NMS_IOU,
+                containmentThreshold: k.DEFAULT_CONTAINMENT,
+                minAreaFraction: k.DEFAULT_MIN_AREA_FRACTION
+            )
         } catch {
             return nil
         }

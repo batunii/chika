@@ -39,6 +39,12 @@ jobs:
           TAG="${GITHUB_REF_NAME}"
           echo "name=${TAG#v}" >> "$GITHUB_OUTPUT"
 
+      # Gate the signed release on the shared test suite (a tag on a red commit must not ship).
+      - name: Shared module unit tests
+        run: |
+          chmod +x ./gradlew
+          ./gradlew :shared:jvmTest --stacktrace
+
       - name: Decode signing keystore
         run: echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > "${RUNNER_TEMP}/release.jks"
 

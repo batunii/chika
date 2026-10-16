@@ -46,14 +46,3 @@ fun computePageDraw(
 
     return PageDraw(left, top, scaledWidth, scaledHeight)
 }
-
-/** Linear interpolation between two panels, for animating the camera between views. */
-fun lerpPanel(from: Panel, to: Panel, t: Float): Panel {
-    fun l(a: Float, b: Float) = a + (b - a) * t
-    return Panel(
-        left = l(from.left, to.left),
-        top = l(from.top, to.top),
-        right = l(from.right, to.right),
-        bottom = l(from.bottom, to.bottom),
-    )
-}

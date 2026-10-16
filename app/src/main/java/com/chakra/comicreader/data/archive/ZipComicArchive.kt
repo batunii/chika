@@ -25,7 +25,5 @@ class ZipComicArchive(file: File) : ComicArchive {
     override fun readPage(index: Int): ByteArray =
         zip.getInputStream(entries[index]).use { it.readBytes() }
 
-    override fun pageName(index: Int): String = entries[index].name
-
     override fun close() = zip.close()
 }

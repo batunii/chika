@@ -45,18 +45,6 @@ class PageLoader(
         }
     }
 
-    /** Decodes only the dimensions of page [index] without allocating the full bitmap. */
-    suspend fun pageSize(index: Int): IntArray = withContext(Dispatchers.IO) {
-        decodeMutex.withLock {
-            val bytes = archive.readPage(index)
-            val opts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-            BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts)
-            intArrayOf(opts.outWidth, opts.outHeight)
-        }
-    }
-
-    fun evictAll() = cache.evictAll()
-
     fun close() {
         cache.evictAll()
         runCatching { archive.close() }
@@ -89,7 +77,7 @@ class PageLoader(
             val maxMemKb = (Runtime.getRuntime().maxMemory() / 1024L).toInt()
             // A quarter of the heap, in bytes, capped — same formula iOS applies to physical RAM.
             val quarter = (maxMemKb / PageConstants.cacheMemoryDivisor) * 1024
-            return minOf(quarter, PageConstants.cacheMaxBytes)
+            return minOf(quarter, PageConstants.cacheMaxBytes).coerceAtLeast(PageConstants.cacheMinBytes)
         }
     }
 }

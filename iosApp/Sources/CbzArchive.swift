@@ -18,8 +18,6 @@ final class CbzArchive {
 
     var pageCount: Int { entries.count }
 
-    func pageName(_ index: Int) -> String { entries[index].path }
-
     func readPage(_ index: Int) throws -> Data {
         var data = Data()
         _ = try archive.extract(entries[index], skipCRC32: true) { data.append($0) }

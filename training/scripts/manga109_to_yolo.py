@@ -11,7 +11,7 @@ and drop <face>/<body>.
 Usage:
   python manga109_to_yolo.py --root <manga109 root> --out <dataset dir> [--val-frac 0.1]
 """
-import argparse, os, glob
+import argparse, os, glob, zlib
 import xml.etree.ElementTree as ET
 
 PANEL_CLASS, TEXT_CLASS = 0, 1
@@ -40,8 +40,11 @@ def convert(root, out, val_frac):
 
     pages = 0
     step = max(1, int(1 / val_frac))
+    # Split BY BOOK (stable hash of the title): pages of one manga share art style and characters,
+    # so interleaving them across train/val leaks and inflates validation metrics.
     for xml in xmls:
         title = os.path.splitext(os.path.basename(xml))[0]
+        split = "val" if zlib.crc32(title.encode()) % step == 0 else "train"
         img_root = os.path.join(os.path.dirname(os.path.dirname(xml)), "images", title)
         tree = ET.parse(xml)
         for page in tree.iter("page"):
@@ -62,7 +65,6 @@ def convert(root, out, val_frac):
                 if ln: lines.append(ln)
             if not lines:
                 continue
-            split = "val" if (pages % step == 0) else "train"
             dst_img = os.path.join(out, "images", split, f"m109_{title}_{idx:03d}.jpg")
             dst_lbl = os.path.join(out, "labels", split, f"m109_{title}_{idx:03d}.txt")
             os.makedirs(os.path.dirname(dst_img), exist_ok=True)

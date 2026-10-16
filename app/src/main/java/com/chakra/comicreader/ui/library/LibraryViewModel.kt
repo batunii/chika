@@ -33,11 +33,19 @@ class LibraryViewModel(
     private val _message = MutableStateFlow<String?>(null)
     val message: StateFlow<String?> = _message.asStateFlow()
 
+    init {
+        viewModelScope.launch { repository.pruneMissing() }
+    }
+
+    private var activeImports = 0
+
     fun importComic(uri: Uri) {
         viewModelScope.launch {
+            activeImports++
             _importing.value = true
             val result = repository.importComic(uri)
-            _importing.value = false
+            activeImports--
+            _importing.value = activeImports > 0
             result.exceptionOrNull()?.let {
                 _message.value = it.message ?: "Import failed."
             }

@@ -9,12 +9,14 @@ import android.provider.OpenableColumns
 import android.util.Log
 import com.chakra.comicreader.data.archive.ComicArchiveFactory
 import com.chakra.comicreader.data.archive.ComicFormat
+import com.chakra.comicreader.data.archive.ComicFormatDetector
 import com.chakra.comicreader.data.archive.UnsupportedComicException
 import com.chakra.comicreader.data.db.ComicDao
 import com.chakra.comicreader.data.db.ComicEntity
 import com.chakra.comicreader.data.settings.AppSettings
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.UUID
@@ -52,13 +54,40 @@ class LibraryRepository(
         val ext = displayName.substringAfterLast('.', "").lowercase().ifEmpty { "cbz" }
         val title = displayName.substringBeforeLast('.', displayName)
         val dest = File(comicsDir, "$token.$ext")
+        val coverFile = File(coversDir, "$token.jpg")
 
         try {
-            context.contentResolver.openInputStream(uri)?.use { input ->
-                dest.outputStream().use { input.copyTo(it) }
-            } ?: return@withContext Result.failure(
-                UnsupportedComicException("Could not open the selected file."),
-            )
+            // Peek the magic bytes before copying so a wrong pick (a multi-GB video, say) is
+            // rejected without filling app storage first.
+            var rejected = false
+            val opened = context.contentResolver.openInputStream(uri)?.use { input ->
+                val head = ByteArray(HEAD_BYTES)
+                var n = 0
+                while (n < head.size) {
+                    val r = input.read(head, n, head.size - n)
+                    if (r < 0) break
+                    n += r
+                }
+                if (ComicFormatDetector.detect(head.copyOf(n), ext) == ComicFormat.UNKNOWN) {
+                    rejected = true
+                } else {
+                    dest.outputStream().use { out ->
+                        out.write(head, 0, n)
+                        input.copyTo(out)
+                    }
+                }
+                true
+            } ?: false
+            if (!opened) {
+                return@withContext Result.failure(
+                    UnsupportedComicException("Could not open the selected file."),
+                )
+            }
+            if (rejected) {
+                return@withContext Result.failure(
+                    UnsupportedComicException("Not a CBZ or CBR file."),
+                )
+            }
 
             val format = ComicArchiveFactory.detectFormat(dest)
             if (format == ComicFormat.UNKNOWN) {
@@ -71,7 +100,6 @@ class LibraryRepository(
             val (pageCount, coverPath) = ComicArchiveFactory.open(dest).use { archive ->
                 val count = archive.pageCount
                 if (count == 0) return@use 0 to null
-                val coverFile = File(coversDir, "$token.jpg")
                 val saved = runCatching { saveCover(archive.readPage(0), coverFile) }
                     .getOrDefault(false)
                 count to coverFile.absolutePath.takeIf { saved }
@@ -101,15 +129,28 @@ class LibraryRepository(
         } catch (t: Throwable) {
             Log.e(TAG, "Import failed", t)
             dest.delete()
+            coverFile.delete()
             Result.failure(t)
         }
     }
 
     suspend fun deleteComic(id: Long) = withContext(Dispatchers.IO) {
         val comic = dao.getById(id) ?: return@withContext
+        // Row first: a kill between the steps leaves orphan files (harmless) instead of a library
+        // entry whose file is gone.
+        dao.delete(id)
         runCatching { File(comic.filePath).delete() }
         comic.coverPath?.let { runCatching { File(it).delete() } }
-        dao.delete(id)
+    }
+
+    /**
+     * Drops rows whose archive no longer exists — e.g. after a backup restore or device transfer,
+     * which brings the database back without the (excluded) comic files.
+     */
+    suspend fun pruneMissing() = withContext(Dispatchers.IO) {
+        comics.first()
+            .filter { !File(it.filePath).exists() }
+            .forEach { dao.delete(it.id) }
     }
 
     private fun saveCover(pageBytes: ByteArray, dest: File): Boolean {
@@ -153,5 +194,6 @@ class LibraryRepository(
     companion object {
         private const val TAG = "LibraryRepository"
         private const val COVER_MAX_DIMENSION = 600
+        private const val HEAD_BYTES = 8
     }
 }

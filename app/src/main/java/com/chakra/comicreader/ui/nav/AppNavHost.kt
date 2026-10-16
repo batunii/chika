@@ -5,6 +5,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.navigation.NavController
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -22,6 +23,11 @@ private object Routes {
     const val READER = "reader/{comicId}"
     const val MENU = "menu"
     fun reader(comicId: Long) = "reader/$comicId"
+}
+
+/** Pops only when there is somewhere to go back to: a double-tap on Back must not pop the start destination. */
+private fun NavController.popIfPossible() {
+    if (previousBackStackEntry != null) popBackStack()
 }
 
 @Composable
@@ -43,7 +49,7 @@ fun AppNavHost() {
             MenuScreen(
                 amoledTheme = amoled,
                 onSetAmoledTheme = app::setAmoledTheme,
-                onBack = { navController.popBackStack() },
+                onBack = { navController.popIfPossible() },
             )
         }
         composable(
@@ -55,7 +61,7 @@ fun AppNavHost() {
                 key = "reader-$comicId",
                 factory = ReaderViewModel.factory(app, comicId),
             )
-            ReaderScreen(viewModel = vm, onBack = { navController.popBackStack() })
+            ReaderScreen(viewModel = vm, onBack = { navController.popIfPossible() })
         }
     }
 }

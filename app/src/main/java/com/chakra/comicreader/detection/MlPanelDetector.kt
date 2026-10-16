@@ -46,12 +46,12 @@ class MlPanelDetector private constructor(
         )
     }
 
-    override fun detect(page: Bitmap, rightToLeft: Boolean): List<Panel> = synchronized(lock) {
+    override fun detect(page: Bitmap, rightToLeft: Boolean): List<Panel>? = synchronized(lock) {
         val result = try {
             run(page)
         } catch (t: Throwable) {
-            Log.e(TAG, "Inference failed; falling back to full page", t)
-            DetectResult(emptyList(), emptyList(), page.width, page.height)
+            Log.e(TAG, "Inference failed; showing the full page (not cached)", t)
+            return@synchronized null
         }
         // Single shared post-processing path (gap-fill → order → merge/divide), same as iOS.
         val planned = PanelPipeline.zoomRegions(

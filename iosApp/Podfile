@@ -9,4 +9,8 @@ project 'Chika.xcodeproj'
 
 target 'Chika' do
   pod 'TensorFlowLiteSwift', '2.17.0'
+
+  target 'ChikaTests' do
+    inherit! :search_paths
+  end
 end

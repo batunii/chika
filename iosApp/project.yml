@@ -23,7 +23,7 @@ settings:
 packages:
   ZIPFoundation:
     url: https://github.com/weichsel/ZIPFoundation
-    from: "0.9.19"
+    exactVersion: "0.9.20"
   # FOSS RAR5 reader: libarchive's BSD-licensed C library as a prebuilt xcframework. We depend on
   # the raw `libarchive` C product (not the package's Swift wrapper, whose writer fails Swift 6
   # strict-concurrency checks on current toolchains) and read it via a small C-API wrapper — we
@@ -121,11 +121,36 @@ targets:
           fi
         basedOnDependencyAnalysis: false
 
+  ChikaTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: Tests
+    dependencies:
+      - target: Chika
+      - package: ZIPFoundation
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.chakra.comicreader.tests
+        GENERATE_INFOPLIST_FILE: YES
+        # The test bundle imports the app module, which imports the Kotlin framework; it needs the
+        # same search paths (the framework itself is linked into the host app, not the bundle).
+        "FRAMEWORK_SEARCH_PATHS[sdk=iphoneos*]":
+          - "$(inherited)"
+          - "$(SRCROOT)/../shared/build/bin/iosArm64/releaseFramework"
+        "FRAMEWORK_SEARCH_PATHS[sdk=iphonesimulator*]":
+          - "$(inherited)"
+          - "$(SRCROOT)/../shared/build/bin/iosSimulatorArm64/releaseFramework"
+
 schemes:
   Chika:
     build:
       targets:
         Chika: all
+        ChikaTests: [test]
+    test:
+      targets:
+        - ChikaTests
     run:
       config: Debug
     archive:

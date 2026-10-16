@@ -52,17 +52,4 @@ class CameraTransformTest {
         assertTrue(draw.left.isFinite())
         assertTrue(draw.top.isFinite())
     }
-
-    @Test
-    fun lerpPanelInterpolatesLinearly() {
-        val from = Panel(0f, 0f, 1f, 1f)
-        val to = Panel(0.2f, 0.4f, 0.6f, 0.8f)
-        assertEquals(from, lerpPanel(from, to, 0f))
-        assertEquals(to, lerpPanel(from, to, 1f))
-        val mid = lerpPanel(from, to, 0.5f)
-        assertNear(0.1f, mid.left)
-        assertNear(0.2f, mid.top)
-        assertNear(0.8f, mid.right)
-        assertNear(0.9f, mid.bottom)
-    }
 }

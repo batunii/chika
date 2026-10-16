@@ -17,26 +17,35 @@ enum CbrConverter {
 
     static func convertToCbz(source: URL, destination: URL) async throws {
         try await Task.detached(priority: .userInitiated) {
-            let entries = try CbrReader.readEntries(at: source)
-                .filter { ComicArchiveKt.isImageEntry(name: $0.path) }
-                .sorted { NaturalOrderComparator.shared.compare(a: $0.path, b: $1.path) < 0 }
-            guard !entries.isEmpty else { throw ConversionError.noImages }
-
-            // Stage images in a temp dir with zero-padded, order-preserving names, then zip into the
-            // destination CBZ.
             let fm = FileManager.default
             let staging = fm.temporaryDirectory.appendingPathComponent("cbr-\(UUID().uuidString)", isDirectory: true)
             try fm.createDirectory(at: staging, withIntermediateDirectories: true)
-            defer { try? fm.removeItem(at: staging) }
-
-            for (index, item) in entries.enumerated() {
-                let ext = (item.path as NSString).pathExtension
-                let name = String(format: "%05d.%@", index, ext.isEmpty ? "jpg" : ext)
-                try Data(item.bytes).write(to: staging.appendingPathComponent(name))
+            let tmpZip = fm.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).cbz")
+            defer {
+                try? fm.removeItem(at: staging)
+                try? fm.removeItem(at: tmpZip)
             }
 
-            try? fm.removeItem(at: destination)
-            try fm.zipItem(at: staging, to: destination, shouldKeepParent: false)
+            // Stream image entries to disk (one entry in memory at a time), then order them.
+            let extracted = try CbrReader.extractEntries(
+                at: source,
+                include: { ComicArchiveKt.isImageEntry(name: $0) },
+                into: staging
+            ).sorted { NaturalOrderComparator.shared.compare(a: $0.path, b: $1.path) < 0 }
+            guard !extracted.isEmpty else { throw ConversionError.noImages }
+
+            // Rename to zero-padded, order-preserving names, then zip.
+            let pages = staging.appendingPathComponent("pages", isDirectory: true)
+            try fm.createDirectory(at: pages, withIntermediateDirectories: true)
+            for (index, item) in extracted.enumerated() {
+                let ext = (item.path as NSString).pathExtension
+                let name = String(format: "%05d.%@", index, ext.isEmpty ? "jpg" : ext)
+                try fm.moveItem(at: item.file, to: pages.appendingPathComponent(name))
+            }
+
+            // Zip to a temp file and move into place, so a failure never leaves a partial CBZ.
+            try fm.zipItem(at: pages, to: tmpZip, shouldKeepParent: false)
+            try fm.moveItem(at: tmpZip, to: destination)
         }.value
     }
 }
