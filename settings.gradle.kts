@@ -19,7 +19,11 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
-        maven { url = uri("https://jitpack.io") }
+        maven {
+            url = uri("https://jitpack.io")
+            // Only the 7-Zip-JBinding native bundle comes from JitPack; never let it serve other groups.
+            content { includeGroup("com.github.omicronapps") }
+        }
     }
 }
 

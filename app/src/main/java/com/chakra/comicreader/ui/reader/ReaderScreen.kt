@@ -44,6 +44,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -133,7 +134,12 @@ fun ReaderScreen(
             .background(MaterialTheme.colorScheme.background),
     ) {
         when {
-            state.error != null -> ErrorView(state.error!!)
+            state.error != null -> ErrorView(
+                message = state.error!!,
+                canNavigate = state.pageCount > 1,
+                onPrev = viewModel::previousPage,
+                onNext = viewModel::nextPage,
+            )
             state.page == null -> LoadingView()
             else -> PageViewer(
                 state = state,
@@ -348,7 +354,7 @@ private fun PageViewer(
                             pastSlop = true
                         }
                         if (pastSlop) {
-                            val newScale = (userScale * zoomChange).coerceIn(1f, 5f)
+                            val newScale = (userScale * zoomChange).coerceIn(ReaderGestureConfig.minZoom, ReaderGestureConfig.maxZoom)
                             userScale = newScale
                             // Horizontal stays covered (no background at the sides); vertical floats
                             // over the background, bounded so a sliver always stays grabbable.
@@ -395,7 +401,8 @@ private fun PageViewer(
                         // floats the comic over the background and stays put). Velocity, not distance,
                         // is what separates a deliberate swipe from a reposition.
                         val v = velocity.calculateVelocity()
-                        if (abs(v.x) > FLICK_VELOCITY_PX_S && abs(v.x) > abs(v.y) * SWIPE_HORIZONTAL_BIAS) {
+                        if (abs(v.x) > ReaderGestureConfig.flickVelocityPxS &&
+                            abs(v.x) > abs(v.y) * ReaderGestureConfig.swipeHorizontalBias) {
                             if (v.x < 0f) { if (rtl) onPrevPage() else onNextPage() }
                             else { if (rtl) onNextPage() else onPrevPage() }
                         }
@@ -436,49 +443,26 @@ private fun LoadingView() {
 }
 
 @Composable
-private fun ErrorView(message: String) {
+internal fun ErrorView(message: String, canNavigate: Boolean, onPrev: () -> Unit, onNext: () -> Unit) {
     Box(Modifier.fillMaxSize().padding(32.dp), contentAlignment = Alignment.Center) {
-        Text(
-            text = message,
-            color = MaterialTheme.colorScheme.error,
-            style = MaterialTheme.typography.bodyLarge,
-        )
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(
+                text = message,
+                color = MaterialTheme.colorScheme.error,
+                style = MaterialTheme.typography.bodyLarge,
+            )
+            if (canNavigate) {
+                Row(Modifier.padding(top = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    TextButton(onClick = onPrev) { Text("Previous page") }
+                    TextButton(onClick = onNext) { Text("Next page") }
+                }
+            }
+        }
     }
 }
 
-/**
- * Horizontal clamp ("cover"): the comic never exposes background to its left or right. When wider
- * than the screen (zoomed) it pans only until an edge meets the screen edge; when it fits, it's
- * centered. This keeps sideways drags clean and reserves horizontal flicks for page turns. [base] is
- * the image's left at zero pan, [size] its scaled width, [container] the screen width.
- */
-private fun clampPanHorizontal(pan: Float, base: Float, size: Float, container: Float): Float {
-    if (size <= container) return (container - size) / 2f - base
-    return pan.coerceIn(container - size - base, -base)
-}
-
-/**
- * Vertical clamp ("float over background"): the comic may move freely up/down — even past the top or
- * bottom edge, revealing background — but is bounded so at least [MIN_VISIBLE_FRACTION] of it always
- * stays on screen and grabbable. [base] is the image's top at zero pan, [size] its scaled height,
- * [container] the screen height.
- */
-private fun clampPanVertical(pan: Float, base: Float, size: Float, container: Float): Float {
-    val keep = MIN_VISIBLE_FRACTION * minOf(size, container)
-    return pan.coerceIn(keep - size - base, container - keep - base)
-}
-
-/** Fraction of the comic kept on screen when it's dragged off the top/bottom, so it can't be lost. */
-private const val MIN_VISIBLE_FRACTION = 0.15f
-
 /** A single tap waits this long for a possible second tap before acting, enabling double-tap. */
 private const val DOUBLE_TAP_WINDOW_MS = 220L
-
-/** Min horizontal release speed (px/s) for a one-finger drag to count as a page-turn flick. */
-private const val FLICK_VELOCITY_PX_S = 700f
-
-/** A flick must be this many times more horizontal than vertical to turn the page. */
-private const val SWIPE_HORIZONTAL_BIAS = 1.2f
 
 /** Reading-direction control that shows its current state (LTR/RTL) so its purpose is obvious. */
 @Composable

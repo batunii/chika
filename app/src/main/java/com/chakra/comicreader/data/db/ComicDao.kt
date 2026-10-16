@@ -23,6 +23,9 @@ interface ComicDao {
     @Query("UPDATE comics SET rightToLeft = :rtl WHERE id = :id")
     suspend fun updateReadingDirection(id: Long, rtl: Boolean): Int
 
+    @Query("UPDATE comics SET filePath = :path, format = :format WHERE id = :id")
+    suspend fun updateFile(id: Long, path: String, format: String): Int
+
     @Query("DELETE FROM comics WHERE id = :id")
     suspend fun delete(id: Long): Int
 }

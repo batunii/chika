@@ -36,6 +36,12 @@ class MlPanelDetector private constructor(
     private val decoder = YoloPanelDecoder(inputSize = inputSize)
 
     init {
+        // The shipped model has float32 input and output (verified on device); a quantized-I/O model
+        // would need dequantization this class no longer carries. Fail loudly at load time rather
+        // than feed the decoder garbage.
+        require(inputTensor.dataType() == DataType.FLOAT32 && outputTensor.dataType() == DataType.FLOAT32) {
+            "Unsupported model I/O: input=${inputTensor.dataType()} output=${outputTensor.dataType()} (need FLOAT32)"
+        }
         Log.i(
             TAG,
             "model loaded | input shape=${inputTensor.shape().toList()} type=${inputTensor.dataType()} " +
@@ -46,12 +52,12 @@ class MlPanelDetector private constructor(
         )
     }
 
-    override fun detect(page: Bitmap, rightToLeft: Boolean): List<Panel> = synchronized(lock) {
+    override fun detect(page: Bitmap, rightToLeft: Boolean): List<Panel>? = synchronized(lock) {
         val result = try {
             run(page)
         } catch (t: Throwable) {
-            Log.e(TAG, "Inference failed; falling back to full page", t)
-            DetectResult(emptyList(), emptyList(), page.width, page.height)
+            Log.e(TAG, "Inference failed; showing the full page (not cached)", t)
+            return@synchronized null
         }
         // Single shared post-processing path (gap-fill → order → merge/divide), same as iOS.
         val planned = PanelPipeline.zoomRegions(
@@ -78,12 +84,9 @@ class MlPanelDetector private constructor(
         return decoder.decode(raw, outputTensor.shape(), lb, bw, bh)
     }
 
-    /** Fills the model input buffer with the letterboxed RGB image (handles float or quantized). */
+    /** Fills the model input buffer with the letterboxed RGB image, normalized to 0–1 (float32). */
     private fun buildInput(resized: Bitmap, newW: Int, newH: Int, padX: Int, padY: Int): ByteBuffer {
-        val float = inputTensor.dataType() == DataType.FLOAT32
-        val bytesPer = if (float) 4 else 1
-        val buf = ByteBuffer.allocateDirect(inputSize * inputSize * 3 * bytesPer)
-            .order(ByteOrder.nativeOrder())
+        val buf = ByteBuffer.allocateDirect(inputSize * inputSize * 3 * 4).order(ByteOrder.nativeOrder())
 
         val pixels = IntArray(newW * newH)
         resized.getPixels(pixels, 0, newW, 0, 0, newW, newH)
@@ -100,35 +103,18 @@ class MlPanelDetector private constructor(
                     g = (px shr 8) and 0xFF
                     b = px and 0xFF
                 }
-                if (float) {
-                    buf.putFloat(r / 255f); buf.putFloat(g / 255f); buf.putFloat(b / 255f)
-                } else {
-                    buf.put(r.toByte()); buf.put(g.toByte()); buf.put(b.toByte())
-                }
+                buf.putFloat(r / 255f); buf.putFloat(g / 255f); buf.putFloat(b / 255f)
             }
         }
         buf.rewind()
         return buf
     }
 
-    /** Reads the raw output buffer into floats, dequantizing if the model output is quantized. */
+    /** Reads the raw float32 output buffer. */
     private fun readFloats(buf: ByteBuffer, tensor: org.tensorflow.lite.Tensor): FloatArray {
         buf.rewind()
         val n = tensor.shape().fold(1) { a, b -> a * b }
-        val out = FloatArray(n)
-        when (tensor.dataType()) {
-            DataType.FLOAT32 -> for (i in 0 until n) out[i] = buf.float
-            DataType.UINT8 -> {
-                val q = tensor.quantizationParams()
-                for (i in 0 until n) out[i] = ((buf.get().toInt() and 0xFF) - q.zeroPoint) * q.scale
-            }
-            DataType.INT8 -> {
-                val q = tensor.quantizationParams()
-                for (i in 0 until n) out[i] = (buf.get().toInt() - q.zeroPoint) * q.scale
-            }
-            else -> for (i in 0 until n) out[i] = buf.float
-        }
-        return out
+        return FloatArray(n) { buf.float }
     }
 
     fun close() = runCatching { interpreter.close() }

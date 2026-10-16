@@ -48,7 +48,11 @@ jobs:
         run: |
           PLIST=iosApp/Sources/Info.plist
           VER="${GITHUB_REF_NAME#ios-v}"
-          case "$VER" in ios-*|"") VER="0.3.1" ;; esac
+          # Not an ios-vX.Y.Z tag (e.g. a manual run on a branch → "main"): fall back to the
+          # project's MARKETING_VERSION rather than stamping a branch name as the app version.
+          if ! echo "$VER" | grep -Eq '^[0-9]+(\.[0-9]+)*([-+].*)?$'; then
+            VER=$(grep -E '^\s*MARKETING_VERSION:' iosApp/project.yml | head -1 | sed -E 's/.*"([^"]+)".*/\1/')
+          fi
           /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString ${VER}" "$PLIST"
           /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${GITHUB_RUN_NUMBER}" "$PLIST"
           echo "Stamped $PLIST → version ${VER} (build ${GITHUB_RUN_NUMBER})"

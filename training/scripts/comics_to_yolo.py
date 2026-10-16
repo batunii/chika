@@ -10,7 +10,7 @@ Usage:
   python comics_to_yolo.py --src <extracted panels dir> --out <dataset dir> [--val-frac 0.1]
 The <src> dir must contain Images/ and Annotations/.
 """
-import argparse, os, glob, shutil
+import argparse, os, glob, shutil, zlib
 from PIL import Image
 
 PANEL_CLASS = 0
@@ -22,6 +22,7 @@ def convert(src, out, val_frac):
     ann_dir = os.path.join(src, "Annotations")
     img_dir = os.path.join(src, "Images")
     anns = sorted(glob.glob(os.path.join(ann_dir, "*.txt")))
+    step = max(1, int(1 / val_frac)) if val_frac > 0 else 0
     print(f"found {len(anns)} COMICS panel annotation files")
 
     kept = 0
@@ -57,7 +58,9 @@ def convert(src, out, val_frac):
         if not lines:
             continue
 
-        split = "val" if (i % int(1 / val_frac) == 0) else "train"
+        # Split BY BOOK ("{book}_{page}"): neighbouring pages of one book must not straddle train/val.
+        book = stem.rsplit("_", 1)[0]
+        split = "val" if step and zlib.crc32(book.encode()) % step == 0 else "train"
         dst_img = os.path.join(out, "images", split, f"comics_{stem}.jpg")
         dst_lbl = os.path.join(out, "labels", split, f"comics_{stem}.txt")
         os.makedirs(os.path.dirname(dst_img), exist_ok=True)

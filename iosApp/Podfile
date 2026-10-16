@@ -15,4 +15,9 @@ target 'Chika' do
   # resolved through the CDN.
   pod 'TensorFlowLiteSwift', :podspec => 'podspecs/TensorFlowLiteSwift.podspec.json'
   pod 'TensorFlowLiteC', :podspec => 'podspecs/TensorFlowLiteC.podspec.json'
+
+  # Unit-test bundle hosted by the app: reuse the app's pods instead of linking them twice.
+  target 'ChikaTests' do
+    inherit! :search_paths
+  end
 end

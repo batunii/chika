@@ -54,15 +54,17 @@ class CameraTransformTest {
     }
 
     @Test
-    fun lerpPanelInterpolatesLinearly() {
-        val from = Panel(0f, 0f, 1f, 1f)
-        val to = Panel(0.2f, 0.4f, 0.6f, 0.8f)
-        assertEquals(from, lerpPanel(from, to, 0f))
-        assertEquals(to, lerpPanel(from, to, 1f))
-        val mid = lerpPanel(from, to, 0.5f)
-        assertNear(0.1f, mid.left)
-        assertNear(0.2f, mid.top)
-        assertNear(0.8f, mid.right)
-        assertNear(0.9f, mid.bottom)
+    fun horizontalClampCentersWhenImageFitsAndBoundsWhenWider() {
+        assertNear(50f, clampPanHorizontal(pan = 999f, base = 0f, size = 100f, container = 200f))
+        assertNear(0f, clampPanHorizontal(pan = 500f, base = 0f, size = 300f, container = 200f))
+        assertNear(-100f, clampPanHorizontal(pan = -500f, base = 0f, size = 300f, container = 200f))
+    }
+
+    @Test
+    fun verticalClampKeepsASliverOnScreen() {
+        val keep = ReaderGestureConfig.minVisibleFraction * 100f // size 100 < container 400
+        assertNear(400f - keep, clampPanVertical(pan = 9999f, base = 0f, size = 100f, container = 400f))
+        assertNear(keep - 100f, clampPanVertical(pan = -9999f, base = 0f, size = 100f, container = 400f))
+        assertNear(10f, clampPanVertical(pan = 10f, base = 0f, size = 100f, container = 400f))
     }
 }

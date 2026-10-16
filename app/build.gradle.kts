@@ -15,16 +15,26 @@ android {
         minSdk = 26
         targetSdk = 36
         // versionName comes from the git tag in CI (VERSION_NAME), else this default.
-        // versionCode is derived deterministically from MAJOR*10000 + MINOR*100 + PATCH so it is
-        // reproducible and monotonically increasing across all channels (Play, F-Droid, sideload)
-        // — F-Droid builds from source and requires a stable, increasing versionCode. A pre-release
-        // suffix is ignored per component (e.g. "0.2.1-beta" → 0.2.1 → 20100... → 201).
+        // versionCode is derived deterministically as (MAJOR*10000 + MINOR*100 + PATCH) * 100 + SLOT
+        // so it is reproducible and monotonically increasing across all channels (Play, F-Droid,
+        // sideload) — F-Droid builds from source and requires a stable, increasing versionCode.
+        // SLOT is 99 for a final release and the trailing number of a pre-release suffix otherwise
+        // (0.2.1-rc2 → 2, bare 0.2.1-beta → 0), so a pre-release always sorts below its final
+        // release and the two never share a versionCode (0.2.1-rc2 → 20102, 0.2.1 → 20199).
         val appVersionName = System.getenv("VERSION_NAME") ?: "0.2.1"
         versionName = appVersionName
-        versionCode = appVersionName.split('.').map { part ->
+        val preRelease = appVersionName.substringAfter('-', "")
+        val slot = if (preRelease.isEmpty()) 99 else
+            preRelease.takeLastWhile { it.isDigit() }.toIntOrNull()?.coerceAtMost(98) ?: 0
+        versionCode = appVersionName.substringBefore('-').split('.').map { part ->
             part.takeWhile { it.isDigit() }.toIntOrNull() ?: 0
         }.let { p ->
-            (p.getOrElse(0) { 0 } * 10000) + (p.getOrElse(1) { 0 } * 100) + p.getOrElse(2) { 0 }
+            // Minor and patch each get two digits; beyond 99 they would collide with the next
+            // component up (1.0.100 == 1.1.0), so fail the build rather than ship a bad versionCode.
+            require(p.getOrElse(1) { 0 } < 100 && p.getOrElse(2) { 0 } < 100) {
+                "VERSION_NAME '$appVersionName': minor and patch must be < 100 for versionCode"
+            }
+            ((p.getOrElse(0) { 0 } * 10000) + (p.getOrElse(1) { 0 } * 100) + p.getOrElse(2) { 0 }) * 100 + slot
         }
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
@@ -73,6 +83,14 @@ android {
         compose = true
     }
 
+    // Robolectric needs merged resources/manifest to build a real Application for the unit tests.
+    testOptions {
+        unitTests.isIncludeAndroidResources = true
+    }
+
+    // The on-device detector test reads the synthetic comic the iOS sim-check also uses.
+    sourceSets.getByName("androidTest").assets.srcDir("../iosApp/ci")
+
     // Keep the TFLite model uncompressed so it can be memory-mapped by the interpreter.
     androidResources {
         noCompress += "tflite"
@@ -106,8 +124,21 @@ dependencies {
     implementation(libs.androidx.material3)
     implementation(libs.androidx.material.icons.extended)
     implementation(libs.androidx.navigation.compose)
-    implementation(libs.androidx.documentfile)
     debugImplementation(libs.androidx.ui.tooling)
+
+    testImplementation(libs.junit)
+    testImplementation(platform(libs.androidx.compose.bom))
+    testImplementation(libs.androidx.ui.test.junit4)
+    debugImplementation(libs.androidx.ui.test.manifest)
+    testImplementation(libs.robolectric)
+    testImplementation(libs.androidx.test.core)
+    testImplementation(libs.kotlinx.coroutines.test)
+
+    // On-device tests: real 7-Zip native library (RAR) and the real TFLite model.
+    androidTestImplementation(libs.junit)
+    androidTestImplementation(libs.androidx.test.ext.junit)
+    androidTestImplementation(libs.androidx.test.runner)
+    androidTestImplementation(libs.androidx.room.runtime)
 
     implementation(libs.kotlinx.coroutines.android)
 

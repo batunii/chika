@@ -18,17 +18,25 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up JDK 21
+      # Same JDK as CI (the project's jvmTarget is 17), so a release is built exactly like the
+      # commit CI tested.
+      - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: "21"
+          java-version: "17"
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Install required SDK packages
-        run: yes | sdkmanager "platforms;android-36" "build-tools;36.1.0"
+      # GitHub's ubuntu image ships the Android SDK. android-actions/setup-android@v3 now fails there
+      # ("Failed to find package 'tools'"), so use the preinstalled SDK directly. compileSdk 36 /
+      # buildToolsVersion 36.1.0 are pinned in app/build.gradle.kts; installing them here makes a
+      # missing version fail fast with a clear message.
+      - name: Set up Android SDK packages
+        run: |
+          SDKMANAGER=$(command -v sdkmanager || ls "$ANDROID_HOME"/cmdline-tools/*/bin/sdkmanager | head -1)
+          # Redirect from process substitution (not a pipe): `yes | sdkmanager` dies of SIGPIPE under
+          # the runner's default `bash -e -o pipefail`.
+          "$SDKMANAGER" --licenses < <(yes) > /dev/null
+          "$SDKMANAGER" "platforms;android-36" "build-tools;36.1.0"
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
@@ -38,6 +46,12 @@ jobs:
         run: |
           TAG="${GITHUB_REF_NAME}"
           echo "name=${TAG#v}" >> "$GITHUB_OUTPUT"
+
+      # Gate the signed release on the shared test suite (a tag on a red commit must not ship).
+      - name: Shared module unit tests
+        run: |
+          chmod +x ./gradlew
+          ./gradlew :shared:jvmTest --stacktrace
 
       - name: Decode signing keystore
         run: echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > "${RUNNER_TEMP}/release.jks"

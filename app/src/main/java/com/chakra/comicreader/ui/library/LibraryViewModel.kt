@@ -8,6 +8,7 @@ import com.chakra.comicreader.ComicReaderApp
 import com.chakra.comicreader.data.db.ComicEntity
 import com.chakra.comicreader.data.library.LibraryRepository
 import com.chakra.comicreader.data.settings.AppSettings
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -33,15 +34,36 @@ class LibraryViewModel(
     private val _message = MutableStateFlow<String?>(null)
     val message: StateFlow<String?> = _message.asStateFlow()
 
-    fun importComic(uri: Uri) {
+    init {
         viewModelScope.launch {
+            repository.pruneMissing()
+            repository.upgradeLegacyCbr()
+        }
+    }
+
+    private var activeImports = 0
+    private val importJobs = mutableSetOf<Job>()
+
+    fun importComic(uri: Uri) {
+        val job = viewModelScope.launch {
+            activeImports++
             _importing.value = true
-            val result = repository.importComic(uri)
-            _importing.value = false
-            result.exceptionOrNull()?.let {
-                _message.value = it.message ?: "Import failed."
+            try {
+                repository.importComic(uri).exceptionOrNull()?.let {
+                    _message.value = it.message ?: "Import failed."
+                }
+            } finally {
+                activeImports--
+                _importing.value = activeImports > 0
             }
         }
+        importJobs += job
+        job.invokeOnCompletion { importJobs -= job }
+    }
+
+    /** Cancels any in-flight imports (the user tapped the spinner); partial files are cleaned up. */
+    fun cancelImport() {
+        importJobs.toList().forEach { it.cancel() }
     }
 
     fun deleteComic(id: Long) {

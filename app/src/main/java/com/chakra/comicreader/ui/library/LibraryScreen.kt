@@ -200,7 +200,14 @@ fun LibraryScreen(
                     onLongClick = { pendingDelete = comic },
                 )
             }
-            item { AddTile(importing = importing, onClick = { picker.launch(arrayOf("*/*")) }) }
+            item {
+                // While importing, the tile doubles as a cancel button (a stalled cloud file would
+                // otherwise leave the spinner up forever).
+                AddTile(
+                    importing = importing,
+                    onClick = { if (importing) viewModel.cancelImport() else picker.launch(arrayOf("*/*")) },
+                )
+            }
         }
 
         SnackbarHost(

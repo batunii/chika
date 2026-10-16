@@ -88,6 +88,13 @@ struct LibraryView: View {
             }
             // refresh() re-sorts by recency so a just-read comic jumps to the top (Android parity).
             .onAppear { library.refresh(); reloadProgress(); autoOpenIfDebug() }
+            // "Open in Chika" / Copy to Chika from Files, Mail, Safari: the system hands the file to
+            // us (copied into Documents/Inbox because we don't open in place). Import it, then drop
+            // the Inbox copy so it doesn't linger on disk.
+            .onOpenURL { url in
+                library.importComic(from: url)
+                if url.pathComponents.contains("Inbox") { library.discardInboxCopy(url) }
+            }
         }
     }
 

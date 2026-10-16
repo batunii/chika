@@ -15,4 +15,15 @@ object PageConstants {
 
     /** Hard upper bound on the page cache, in bytes (512 MB). */
     val cacheMaxBytes: Int = 512 * 1024 * 1024
+
+    /**
+     * Floor for the page cache, in bytes (128 MB ≈ two worst-case decoded pages). Pages decode up to
+     * just under 2×[maxPageDimension] on the long edge (~70 MB ARGB); with a smaller budget one page
+     * exceeds the cache, so it evicts itself and every prefetch is decoded twice.
+     */
+    val cacheMinBytes: Int = 128 * 1024 * 1024
+
+    /** Largest single archive entry (encoded page) we will read into memory: 100 MB. A bigger
+     *  entry is corrupt or hostile (a real page is a few MB); reading it would OOM the app. */
+    val maxPageBytes: Int = 100 * 1024 * 1024
 }

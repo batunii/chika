@@ -18,11 +18,24 @@ struct ReaderView: View {
     private static let detector = LiteRTPanelDetector()
     private static let ioQueue = DispatchQueue(label: "chika.reader.io", qos: .userInitiated)
     private static let detectQueue = DispatchQueue(label: "chika.reader.detect", qos: .userInitiated)
+    // Bumped on every page load; a queued prefetch whose generation is stale is dropped before it
+    // runs inference, so fast page turns don't queue pointless work ahead of the current page.
+    private static let generationLock = NSLock()
+    private static var generation = 0
+    private static func bumpGeneration() -> Int {
+        generationLock.lock(); defer { generationLock.unlock() }
+        generation += 1
+        return generation
+    }
+    private static func isCurrent(_ g: Int) -> Bool {
+        generationLock.lock(); defer { generationLock.unlock() }
+        return g == generation
+    }
 
     // Flick tuning ported from Android's ReaderScreen: a page turn needs a genuine horizontal flick
     // (velocity, not distance), biased against vertical drags, so a slow reposition doesn't turn.
-    private static let flickVelocityPxS: CGFloat = 700  // Android FLICK_VELOCITY_PX_S
-    private static let swipeHorizontalBias: CGFloat = 1.2 // Android SWIPE_HORIZONTAL_BIAS
+    private static let flickVelocityPxS = CGFloat(ReaderGestureConfig.shared.flickVelocityPxS)
+    private static let swipeHorizontalBias = CGFloat(ReaderGestureConfig.shared.swipeHorizontalBias)
     // Sentinel restoreStep meaning "land on this page's whole-page outro" (used by backward turns);
     // resolved to regions.count once the page's regions are known.
     private static let outroSlot = Int.max
@@ -42,6 +55,11 @@ struct ReaderView: View {
     @State private var rightToLeft = false
     @State private var showChrome = true
     @State private var loadToken = 0
+    // Set when a backward page turn lands on a page whose panels aren't known yet: the outro slot
+    // can't be resolved until detection reports how many panels there are.
+    @State private var resolveOutro = false
+    // The current page couldn't be decoded (so the spinner must not spin forever).
+    @State private var pageFailed = false
     // Detected panels cached per page (in the current reading direction) so back/forward and
     // prefetched pages don't re-run the detector. Cleared when the direction changes.
     @State private var panelCache: [Int: [Panel]] = [:]
@@ -145,18 +163,22 @@ struct ReaderView: View {
         // Resolve the outro sentinel now that this page's regions are known (backward page turns
         // land on the whole-page outro, matching Android).
         step = (restoreStep == Self.outroSlot) ? regions.count : restoreStep
+        resolveOutro = restoreStep == Self.outroSlot && panelCache[page] == nil
+        pageFailed = false
         resetZoom()
         persist()
         pageAlpha = 0.35   // fades up to 1 once the page renders (Android's 280ms page fade-in)
 
         loadToken &+= 1
         let token = loadToken
+        let generation = Self.bumpGeneration()
         let target = page
         Self.ioQueue.async {
             let img = loader.loadPage(target) // downsampled + LRU-cached
             DispatchQueue.main.async {
                 guard token == self.loadToken else { return } // a newer load superseded this one
                 self.image = img
+                self.pageFailed = (img == nil)
                 withAnimation(.easeOut(duration: 0.28)) { self.pageAlpha = 1 }
                 if let cached = self.panelCache[target] {
                     withAnimation(Self.cameraTween) {   // land on the restored slot with the camera tween
@@ -167,7 +189,7 @@ struct ReaderView: View {
                 } else {
                     self.redetect()
                 }
-                self.prefetch(target + 1, loader)
+                self.prefetch(target + 1, loader, generation: generation)
             }
         }
     }
@@ -204,6 +226,9 @@ struct ReaderView: View {
                 guard forPage == self.page else { return }
                 withAnimation(Self.cameraTween) {   // glide into the framed panel when detection lands
                     self.regions = found
+                    // A backward turn onto a not-yet-detected page lands on the outro, now that we
+                    // know how many panels there are.
+                    if self.resolveOutro { self.step = found.count; self.resolveOutro = false }
                     if self.step > found.count { self.step = found.count } // keep intro/outro/panel in range
                 }
                 self.detecting = false
@@ -213,11 +238,12 @@ struct ReaderView: View {
 
     /// Warms the next page in the background — decode (LRU-cached) + detect (panel-cached) — so
     /// stepping onto it is instant instead of stalling on a multi-MB decode + inference.
-    private func prefetch(_ index: Int, _ loader: PageLoader) {
+    private func prefetch(_ index: Int, _ loader: PageLoader, generation: Int) {
         guard index >= 0, index < loader.pageCount, panelCache[index] == nil,
               let detector = Self.detector else { return }
         let rtl = rightToLeft
         Self.detectQueue.async {
+            guard Self.isCurrent(generation) else { return }   // user already moved on
             guard let img = loader.loadPage(index) else { return }
             let found = detector.zoomRegions(for: img, rightToLeft: rtl)
             DispatchQueue.main.async {
@@ -252,7 +278,16 @@ struct ReaderView: View {
         // CameraFraming transform assumes local (0,0) sits at the container's top-left corner.
         .frame(width: size.width, height: size.height, alignment: .topLeading)
         .clipped()
-        .overlay { if image == nil { ProgressView().tint(Chika.ochre) } }
+        .overlay {
+            if image == nil {
+                if pageFailed {
+                    Text("Can't read this page")
+                        .font(.archivo(14)).foregroundColor(Chika.cream)
+                } else {
+                    ProgressView().tint(Chika.ochre)
+                }
+            }
+        }
         // Reticle framing brackets — always drawn while reading (independent of chrome), crimson.
         .overlay { if image != nil {
             Reticle(color: Chika.crimson.opacity(0.45), inset: 6, length: 16, stroke: 2).padding(6)
@@ -264,7 +299,10 @@ struct ReaderView: View {
             ReaderGestures(
                 onTap: { location, sz in tapZone(x: location.x, width: sz.width, in: loader) },
                 onDoubleTap: { showWholePage() },
-                onPinchChanged: { scale in zoom = min(max(steadyZoom * scale, 1), 5) },
+                onPinchChanged: { scale in
+                    zoom = min(max(steadyZoom * scale, CGFloat(ReaderGestureConfig.shared.minZoom)),
+                               CGFloat(ReaderGestureConfig.shared.maxZoom))
+                },
                 onPinchEnded: { if zoom <= 1.01 { resetZoom() } else { steadyZoom = zoom } },
                 onPanChanged: { t in
                     // The comic floats over the background, clamped so it can't be lost off-screen.
@@ -392,25 +430,31 @@ struct ReaderView: View {
         let scaledH = CGFloat(draw.scaledHeight) * zoom
         let baseLeft = cw / 2 + (CGFloat(draw.left) - cw / 2) * zoom
         let baseTop = ch / 2 + (CGFloat(draw.top) - ch / 2) * zoom
-        let x: CGFloat = scaledW <= cw
-            ? (cw - scaledW) / 2 - baseLeft
-            : min(max(raw.width, cw - scaledW - baseLeft), -baseLeft)
-        let keep = 0.15 * min(scaledH, ch)
-        let y = min(max(raw.height, keep - scaledH - baseTop), ch - keep - baseTop)
-        return CGSize(width: x, height: y)
+        let x = CameraTransformKt.clampPanHorizontal(
+            pan: Float(raw.width), base: Float(baseLeft), size: Float(scaledW), container: Float(cw))
+        let y = CameraTransformKt.clampPanVertical(
+            pan: Float(raw.height), base: Float(baseTop), size: Float(scaledH), container: Float(ch))
+        return CGSize(width: CGFloat(x), height: CGFloat(y))
     }
 
     private func advance(by delta: Int, in loader: PageLoader) {
-        let next = step + delta
-        if next > regions.count {                       // past the whole-page outro → next page intro
-            guard page + 1 < loader.pageCount else { return }
-            page += 1; loadPage(loader, restoreStep: -1)
-        } else if next < -1 {                            // before the whole-page intro → prev page outro
-            guard page > 0 else { return }
-            page -= 1; loadPage(loader, restoreStep: Self.outroSlot)
-        } else {
+        // The slot arithmetic is the shared Kotlin ReaderNavigation (also used by Android), so the two
+        // readers can't drift. Its slots are our steps + 1: 0 intro · 1…n panels · n+1 outro.
+        let nav = ReaderNavigation.shared
+        let slot = Int32(step + 1), count = Int32(regions.count)
+        let result = delta > 0
+            ? nav.next(slot: slot, panelCount: count, page: Int32(page), pageCount: Int32(loader.pageCount))
+            : nav.previous(slot: slot, page: Int32(page))
+        switch result.action {
+        case .stay:
+            return
+        case .page:
+            page = Int(result.page)
+            loadPage(loader, restoreStep: result.slot == nav.ENTER_AT_OUTRO ? Self.outroSlot : -1)
+        default: // .slot
+            resolveOutro = false
             withAnimation(Self.cameraTween) {            // tween the camera like Android (360ms)
-                step = next                              // -1 intro · 0…n-1 panels · n outro
+                step = Int(result.slot) - 1              // -1 intro · 0…n-1 panels · n outro
                 resetZoom()
             }
             persist()
@@ -419,6 +463,7 @@ struct ReaderView: View {
 
     /// Jumps to the whole-page view (Android's "show whole page" / ZoomOutMap), resetting any zoom.
     private func showWholePage() {
+        resolveOutro = false
         withAnimation(Self.cameraTween) {
             step = -1
             resetZoom()

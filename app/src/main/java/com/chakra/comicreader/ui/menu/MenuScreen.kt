@@ -65,9 +65,12 @@ fun MenuScreen(
             context.packageManager.getPackageInfo(context.packageName, 0).versionName
         }.getOrNull() ?: "—"
     }
-    val openDonation = {
-        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(DONATION_URL)))
+    // No browser installed (work profile, kiosk) would otherwise crash with ActivityNotFoundException.
+    val openUrl = { url: String ->
+        runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
+        Unit
     }
+    val openDonation = { openUrl(DONATION_URL) }
 
     Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         Box(Modifier.matchParentSize().halftone(Crimson, alpha = 0.05f))
@@ -141,11 +144,11 @@ fun MenuScreen(
 
             Spacer(Modifier.size(18.dp))
             LinkRow("Privacy policy — Chika collects no data.") {
-                context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(PRIVACY_URL)))
+                openUrl(PRIVACY_URL)
             }
             Spacer(Modifier.size(8.dp))
             LinkRow("Open-source licenses & notices.") {
-                context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(LICENSES_URL)))
+                openUrl(LICENSES_URL)
             }
 
             Spacer(Modifier.size(28.dp))

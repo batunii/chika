@@ -28,6 +28,13 @@ class ComicReaderApp : Application() {
         MlPanelDetector.tryCreate(this) ?: NoopPanelSource
     }
 
+    override fun onCreate() {
+        super.onCreate()
+        // Warm the ML model off the main thread so the first reader open doesn't build the
+        // interpreter on Main (the lazy is synchronized, so a racing reader open just waits).
+        Thread { panelSource }.apply { isDaemon = true }.start()
+    }
+
     /** Process-wide reactive theme flag so the whole UI re-themes the moment it's toggled. */
     private val _amoledTheme by lazy { MutableStateFlow(settings.amoledTheme) }
     val amoledTheme: StateFlow<Boolean> by lazy { _amoledTheme.asStateFlow() }

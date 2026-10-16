@@ -10,6 +10,7 @@ import com.chakra.comicreader.data.library.LibraryRepository
 import com.chakra.comicreader.data.page.PageLoader
 import com.chakra.comicreader.detection.Panel
 import com.chakra.comicreader.detection.PanelSource
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -45,6 +46,8 @@ class ReaderViewModel(
 
     private var rightToLeft = false
     private var navJob: Job? = null
+    private var prefetchJob: Job? = null
+    private var progressJob: Job? = null
 
     init {
         viewModelScope.launch { open() }
@@ -57,8 +60,9 @@ class ReaderViewModel(
             return
         }
         rightToLeft = comic.rightToLeft
+        // Opening parses the archive index (and loads the 7-Zip native lib for CBR): keep it off Main.
         val archive = try {
-            ComicArchiveFactory.open(File(comic.filePath))
+            withContext(Dispatchers.IO) { ComicArchiveFactory.open(File(comic.filePath)) }
         } catch (t: Throwable) {
             _state.update { it.copy(loading = false, error = "Could not open this comic: ${t.message}") }
             return
@@ -76,35 +80,43 @@ class ReaderViewModel(
 
     fun next() {
         val s = _state.value
-        if (s.loading || s.error != null) return
-        val lastSlot = s.panels.size + 1
-        when {
-            s.slot < lastSlot -> setSlot(s.slot + 1)
-            s.pageIndex < s.pageCount - 1 -> goToPage(s.pageIndex + 1, targetSlot = 0)
-            // Already at the final outro of the last page: nothing to do.
+        if (s.loading) return
+        if (s.error != null) { // a page failed to load: step past it instead of dead-ending
+            if (s.pageIndex < s.pageCount - 1) goToPage(s.pageIndex + 1, targetSlot = 0)
+            return
         }
+        apply(ReaderNavigation.next(s.slot, s.panels.size, s.pageIndex, s.pageCount))
     }
 
     fun previous() {
         val s = _state.value
-        if (s.loading || s.error != null) return
-        when {
-            s.slot > 0 -> setSlot(s.slot - 1)
-            s.pageIndex > 0 -> goToPage(s.pageIndex - 1, targetSlot = ENTER_AT_OUTRO)
+        if (s.loading) return
+        if (s.error != null) {
+            if (s.pageIndex > 0) goToPage(s.pageIndex - 1, targetSlot = 0)
+            return
+        }
+        apply(ReaderNavigation.previous(s.slot, s.pageIndex))
+    }
+
+    private fun apply(step: NavStep) {
+        when (step.action) {
+            NavAction.SLOT -> setSlot(step.slot)
+            NavAction.PAGE -> goToPage(step.page, targetSlot = step.slot)
+            NavAction.STAY -> Unit
         }
     }
 
     /** Turn to the next whole page (skips remaining panels), landing on its full-page view. */
     fun nextPage() {
         val s = _state.value
-        if (s.loading || s.error != null) return
+        if (s.loading) return
         if (s.pageIndex < s.pageCount - 1) goToPage(s.pageIndex + 1, targetSlot = 0)
     }
 
     /** Turn to the previous whole page, landing on its full-page view. */
     fun previousPage() {
         val s = _state.value
-        if (s.loading || s.error != null) return
+        if (s.loading) return
         if (s.pageIndex > 0) goToPage(s.pageIndex - 1, targetSlot = 0)
     }
 
@@ -118,9 +130,9 @@ class ReaderViewModel(
     /** Jump directly to a page (from the scrubber), landing on its full-page view. */
     fun jumpToPage(page: Int) {
         val s = _state.value
-        if (s.error != null || s.pageCount == 0) return
+        if (s.pageCount == 0) return
         val target = page.coerceIn(0, s.pageCount - 1)
-        if (target != s.pageIndex) goToPage(target, targetSlot = 0)
+        if (target != s.pageIndex || s.error != null) goToPage(target, targetSlot = 0)
     }
 
     fun toggleReadingDirection() {
@@ -140,15 +152,13 @@ class ReaderViewModel(
     private fun goToPage(page: Int, targetSlot: Int) {
         val loader = pageLoader ?: return
         navJob?.cancel()
+        prefetchJob?.cancel() // a stale prefetch must not queue behind the page the user wants now
         navJob = viewModelScope.launch {
             _state.update { it.copy(loading = it.page == null, detecting = true, error = null) }
             try {
                 val bitmap = loader.loadPage(page)
                 val panels = panelsFor(page, bitmap)
-                val resolvedSlot = when (targetSlot) {
-                    ENTER_AT_OUTRO -> panels.size + 1
-                    else -> targetSlot.coerceIn(0, panels.size + 1)
-                }
+                val resolvedSlot = ReaderNavigation.resolveSlot(targetSlot, panels.size)
                 _state.update {
                     it.copy(
                         loading = false,
@@ -162,9 +172,15 @@ class ReaderViewModel(
                 }
                 persistProgress()
                 prefetch(page + 1)
+            } catch (e: CancellationException) {
+                throw e // superseded by a newer navigation; not a load failure
             } catch (t: Throwable) {
+                // Point at the failed page so next/previous/scrubber move on from it.
                 _state.update {
-                    it.copy(loading = false, detecting = false, error = "Failed to load page ${page + 1}: ${t.message}")
+                    it.copy(
+                        loading = false, detecting = false, pageIndex = page,
+                        error = "Failed to load page ${page + 1}: ${t.message}",
+                    )
                 }
             }
         }
@@ -172,16 +188,20 @@ class ReaderViewModel(
 
     private suspend fun panelsFor(page: Int, bitmap: Bitmap): List<Panel> {
         panelCache[page]?.let { return it }
-        val panels = withContext(Dispatchers.Default) { panelSource.detect(bitmap, rightToLeft) }
-        panelCache[page] = panels
-        return panels
+        val rtl = rightToLeft
+        val detected = withContext(Dispatchers.Default) { panelSource.detect(bitmap, rtl) }
+            ?: return listOf(Panel.FULL_PAGE) // detection failed: whole page now, retry next visit
+        // The direction may have been toggled while detecting; don't cache stale-order panels.
+        if (rtl == rightToLeft) panelCache[page] = detected
+        return detected
     }
 
     private fun prefetch(page: Int) {
         val loader = pageLoader ?: return
         if (page < 0 || page >= _state.value.pageCount) return
         if (panelCache.containsKey(page)) return
-        viewModelScope.launch {
+        prefetchJob?.cancel()
+        prefetchJob = viewModelScope.launch {
             runCatching {
                 val bmp = loader.loadPage(page)
                 panelsFor(page, bmp)
@@ -191,7 +211,12 @@ class ReaderViewModel(
 
     private fun persistProgress() {
         val s = _state.value
-        viewModelScope.launch { repository.saveProgress(comicId, s.pageIndex, s.slot) }
+        // Chained so writes land in call order (Room dispatches suspend queries across threads).
+        val previous = progressJob
+        progressJob = viewModelScope.launch {
+            previous?.join()
+            repository.saveProgress(comicId, s.pageIndex, s.slot)
+        }
     }
 
     override fun onCleared() {
@@ -200,9 +225,6 @@ class ReaderViewModel(
     }
 
     companion object {
-        /** Sentinel for [goToPage] meaning "enter this page at its outro" (used when paging back). */
-        private const val ENTER_AT_OUTRO = -1
-
         fun factory(app: ComicReaderApp, comicId: Long): ViewModelProvider.Factory =
             object : ViewModelProvider.Factory {
                 @Suppress("UNCHECKED_CAST")
