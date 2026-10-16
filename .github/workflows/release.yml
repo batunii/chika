@@ -26,11 +26,17 @@ jobs:
           distribution: temurin
           java-version: "17"
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Install required SDK packages
-        run: yes | sdkmanager "platforms;android-36" "build-tools;36.1.0"
+      # GitHub's ubuntu image ships the Android SDK. android-actions/setup-android@v3 now fails there
+      # ("Failed to find package 'tools'"), so use the preinstalled SDK directly. compileSdk 36 /
+      # buildToolsVersion 36.1.0 are pinned in app/build.gradle.kts; installing them here makes a
+      # missing version fail fast with a clear message.
+      - name: Set up Android SDK packages
+        run: |
+          SDKMANAGER=$(command -v sdkmanager || ls "$ANDROID_HOME"/cmdline-tools/*/bin/sdkmanager | head -1)
+          # Redirect from process substitution (not a pipe): `yes | sdkmanager` dies of SIGPIPE under
+          # the runner's default `bash -e -o pipefail`.
+          "$SDKMANAGER" --licenses < <(yes) > /dev/null
+          "$SDKMANAGER" "platforms;android-36" "build-tools;36.1.0"
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
