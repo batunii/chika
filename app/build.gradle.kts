@@ -88,6 +88,9 @@ android {
         unitTests.isIncludeAndroidResources = true
     }
 
+    // The on-device detector test reads the synthetic comic the iOS sim-check also uses.
+    sourceSets.getByName("androidTest").assets.srcDir("../iosApp/ci")
+
     // Keep the TFLite model uncompressed so it can be memory-mapped by the interpreter.
     androidResources {
         noCompress += "tflite"
@@ -124,9 +127,18 @@ dependencies {
     debugImplementation(libs.androidx.ui.tooling)
 
     testImplementation(libs.junit)
+    testImplementation(platform(libs.androidx.compose.bom))
+    testImplementation(libs.androidx.ui.test.junit4)
+    debugImplementation(libs.androidx.ui.test.manifest)
     testImplementation(libs.robolectric)
     testImplementation(libs.androidx.test.core)
     testImplementation(libs.kotlinx.coroutines.test)
+
+    // On-device tests: real 7-Zip native library (RAR) and the real TFLite model.
+    androidTestImplementation(libs.junit)
+    androidTestImplementation(libs.androidx.test.ext.junit)
+    androidTestImplementation(libs.androidx.test.runner)
+    androidTestImplementation(libs.androidx.room.runtime)
 
     implementation(libs.kotlinx.coroutines.android)
 

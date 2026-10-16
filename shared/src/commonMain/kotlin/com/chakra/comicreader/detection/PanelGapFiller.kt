@@ -23,6 +23,12 @@ object PanelGapFiller {
         val grid: Int = 64,
         /** Safety cap on how many missed panels to recover from one page. */
         val maxFills: Int = 8,
+        /**
+         * Only fill gaps when the detected panels cover at least this fraction of the page. A page
+         * that is mostly empty (a splash page, a credits page with one logo) has no "missed panels":
+         * filling its empty space would invent up to [maxFills] fake ones.
+         */
+        val minCoveredFraction: Float = 0.15f,
     )
 
     fun fill(panels: List<Panel>, config: Config = Config()): List<Panel> {
@@ -40,6 +46,8 @@ object PanelGapFiller {
                 }
             }
         }
+
+        if (covered.count { it }.toFloat() / covered.size < config.minCoveredFraction) return panels
 
         val cellArea = 1f / (n * n)
         val gaps = ArrayList<Panel>()

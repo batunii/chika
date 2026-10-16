@@ -22,4 +22,8 @@ object PageConstants {
      * exceeds the cache, so it evicts itself and every prefetch is decoded twice.
      */
     val cacheMinBytes: Int = 128 * 1024 * 1024
+
+    /** Largest single archive entry (encoded page) we will read into memory: 100 MB. A bigger
+     *  entry is corrupt or hostile (a real page is a few MB); reading it would OOM the app. */
+    val maxPageBytes: Int = 100 * 1024 * 1024
 }

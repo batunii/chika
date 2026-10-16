@@ -9,6 +9,7 @@ import com.chakra.comicreader.data.db.ComicEntity
 import com.chakra.comicreader.data.settings.AppSettings
 import com.chakra.comicreader.testutil.TestComics
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -136,5 +137,34 @@ class LibraryRepositoryTest {
         assertEquals(2, comic.lastPage)
         assertEquals(3, comic.lastSlot)
         assertTrue(comic.rightToLeft)
+    }
+
+    /** A cancelled import must clean up its partial copy and propagate the cancellation. */
+    @Test
+    fun cancelledImportCleansUpAndPropagates() = runBlocking {
+        val uri = Uri.parse("content://chika.test/big.cbz")
+        lateinit var job: kotlinx.coroutines.Job
+        var reads = 0
+        val stream = object : java.io.InputStream() {
+            override fun read(): Int = -1
+            override fun read(b: ByteArray, off: Int, len: Int): Int {
+                reads++
+                if (reads == 1) { // magic head: "PK\u0003\u0004" + padding
+                    byteArrayOf(0x50, 0x4B, 0x03, 0x04, 0, 0, 0, 0).copyInto(b, off)
+                    return 8
+                }
+                job.cancel() // user taps cancel mid-copy
+                return minOf(len, 4096) // data keeps flowing; the loop must notice the cancellation
+            }
+        }
+        org.robolectric.Shadows.shadowOf(context.contentResolver).registerInputStream(uri, stream)
+
+        job = launch(kotlinx.coroutines.Dispatchers.Default) { repo.importComic(uri) }
+        job.join()
+
+        assertTrue("import was cancelled", job.isCancelled)
+        assertTrue("no orphan comic copy", files(comicsDir).isEmpty())
+        assertTrue("no orphan cover", files(coversDir).isEmpty())
+        assertTrue(repo.comics.first().isEmpty())
     }
 }

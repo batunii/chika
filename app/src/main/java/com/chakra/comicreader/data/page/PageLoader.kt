@@ -55,19 +55,11 @@ class PageLoader(
         BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
 
         val opts = BitmapFactory.Options().apply {
-            inSampleSize = computeInSampleSize(bounds.outWidth, bounds.outHeight, maxDim)
+            inSampleSize = PageSampling.sampleSize(maxOf(bounds.outWidth, bounds.outHeight), maxDim)
             inPreferredConfig = Bitmap.Config.ARGB_8888
         }
         return BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts)
             ?: throw IllegalStateException("Failed to decode page (corrupt or unsupported image)")
-    }
-
-    private fun computeInSampleSize(width: Int, height: Int, maxDim: Int): Int {
-        val longEdge = maxOf(width, height)
-        if (longEdge <= maxDim || longEdge <= 0) return 1
-        var sample = 1
-        while (longEdge / (sample * 2) >= maxDim) sample *= 2
-        return sample
     }
 
     companion object {

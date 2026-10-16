@@ -85,12 +85,7 @@ class ReaderViewModel(
             if (s.pageIndex < s.pageCount - 1) goToPage(s.pageIndex + 1, targetSlot = 0)
             return
         }
-        val lastSlot = s.panels.size + 1
-        when {
-            s.slot < lastSlot -> setSlot(s.slot + 1)
-            s.pageIndex < s.pageCount - 1 -> goToPage(s.pageIndex + 1, targetSlot = 0)
-            // Already at the final outro of the last page: nothing to do.
-        }
+        apply(ReaderNavigation.next(s.slot, s.panels.size, s.pageIndex, s.pageCount))
     }
 
     fun previous() {
@@ -100,9 +95,14 @@ class ReaderViewModel(
             if (s.pageIndex > 0) goToPage(s.pageIndex - 1, targetSlot = 0)
             return
         }
-        when {
-            s.slot > 0 -> setSlot(s.slot - 1)
-            s.pageIndex > 0 -> goToPage(s.pageIndex - 1, targetSlot = ENTER_AT_OUTRO)
+        apply(ReaderNavigation.previous(s.slot, s.pageIndex))
+    }
+
+    private fun apply(step: NavStep) {
+        when (step.action) {
+            NavAction.SLOT -> setSlot(step.slot)
+            NavAction.PAGE -> goToPage(step.page, targetSlot = step.slot)
+            NavAction.STAY -> Unit
         }
     }
 
@@ -158,10 +158,7 @@ class ReaderViewModel(
             try {
                 val bitmap = loader.loadPage(page)
                 val panels = panelsFor(page, bitmap)
-                val resolvedSlot = when (targetSlot) {
-                    ENTER_AT_OUTRO -> panels.size + 1
-                    else -> targetSlot.coerceIn(0, panels.size + 1)
-                }
+                val resolvedSlot = ReaderNavigation.resolveSlot(targetSlot, panels.size)
                 _state.update {
                     it.copy(
                         loading = false,
@@ -228,9 +225,6 @@ class ReaderViewModel(
     }
 
     companion object {
-        /** Sentinel for [goToPage] meaning "enter this page at its outro" (used when paging back). */
-        private const val ENTER_AT_OUTRO = -1
-
         fun factory(app: ComicReaderApp, comicId: Long): ViewModelProvider.Factory =
             object : ViewModelProvider.Factory {
                 @Suppress("UNCHECKED_CAST")

@@ -34,8 +34,8 @@ struct ReaderView: View {
 
     // Flick tuning ported from Android's ReaderScreen: a page turn needs a genuine horizontal flick
     // (velocity, not distance), biased against vertical drags, so a slow reposition doesn't turn.
-    private static let flickVelocityPxS: CGFloat = 700  // Android FLICK_VELOCITY_PX_S
-    private static let swipeHorizontalBias: CGFloat = 1.2 // Android SWIPE_HORIZONTAL_BIAS
+    private static let flickVelocityPxS = CGFloat(ReaderGestureConfig.shared.flickVelocityPxS)
+    private static let swipeHorizontalBias = CGFloat(ReaderGestureConfig.shared.swipeHorizontalBias)
     // Sentinel restoreStep meaning "land on this page's whole-page outro" (used by backward turns);
     // resolved to regions.count once the page's regions are known.
     private static let outroSlot = Int.max
@@ -299,7 +299,10 @@ struct ReaderView: View {
             ReaderGestures(
                 onTap: { location, sz in tapZone(x: location.x, width: sz.width, in: loader) },
                 onDoubleTap: { withAnimation(Self.recenterTween) { resetZoom() } },
-                onPinchChanged: { scale in zoom = min(max(steadyZoom * scale, 1), 5) },
+                onPinchChanged: { scale in
+                    zoom = min(max(steadyZoom * scale, CGFloat(ReaderGestureConfig.shared.minZoom)),
+                               CGFloat(ReaderGestureConfig.shared.maxZoom))
+                },
                 onPinchEnded: { if zoom <= 1.01 { resetZoom() } else { steadyZoom = zoom } },
                 onPanChanged: { t in
                     // The comic floats over the background, clamped so it can't be lost off-screen.
@@ -427,26 +430,31 @@ struct ReaderView: View {
         let scaledH = CGFloat(draw.scaledHeight) * zoom
         let baseLeft = cw / 2 + (CGFloat(draw.left) - cw / 2) * zoom
         let baseTop = ch / 2 + (CGFloat(draw.top) - ch / 2) * zoom
-        let x: CGFloat = scaledW <= cw
-            ? (cw - scaledW) / 2 - baseLeft
-            : min(max(raw.width, cw - scaledW - baseLeft), -baseLeft)
-        let keep = 0.15 * min(scaledH, ch)
-        let y = min(max(raw.height, keep - scaledH - baseTop), ch - keep - baseTop)
-        return CGSize(width: x, height: y)
+        let x = CameraTransformKt.clampPanHorizontal(
+            pan: Float(raw.width), base: Float(baseLeft), size: Float(scaledW), container: Float(cw))
+        let y = CameraTransformKt.clampPanVertical(
+            pan: Float(raw.height), base: Float(baseTop), size: Float(scaledH), container: Float(ch))
+        return CGSize(width: CGFloat(x), height: CGFloat(y))
     }
 
     private func advance(by delta: Int, in loader: PageLoader) {
-        let next = step + delta
-        if next > regions.count {                       // past the whole-page outro → next page intro
-            guard page + 1 < loader.pageCount else { return }
-            page += 1; loadPage(loader, restoreStep: -1)
-        } else if next < -1 {                            // before the whole-page intro → prev page outro
-            guard page > 0 else { return }
-            page -= 1; loadPage(loader, restoreStep: Self.outroSlot)
-        } else {
+        // The slot arithmetic is the shared Kotlin ReaderNavigation (also used by Android), so the two
+        // readers can't drift. Its slots are our steps + 1: 0 intro · 1…n panels · n+1 outro.
+        let nav = ReaderNavigation.shared
+        let slot = Int32(step + 1), count = Int32(regions.count)
+        let result = delta > 0
+            ? nav.next(slot: slot, panelCount: count, page: Int32(page), pageCount: Int32(loader.pageCount))
+            : nav.previous(slot: slot, page: Int32(page))
+        switch result.action {
+        case .stay:
+            return
+        case .page:
+            page = Int(result.page)
+            loadPage(loader, restoreStep: result.slot == nav.ENTER_AT_OUTRO ? Self.outroSlot : -1)
+        default: // .slot
             resolveOutro = false
             withAnimation(Self.cameraTween) {            // tween the camera like Android (360ms)
-                step = next                              // -1 intro · 0…n-1 panels · n outro
+                step = Int(result.slot) - 1              // -1 intro · 0…n-1 panels · n outro
                 resetZoom()
             }
             persist()

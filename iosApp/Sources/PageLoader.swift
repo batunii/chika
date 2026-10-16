@@ -54,7 +54,7 @@ final class PageLoader {
         let h = (props?[kCGImagePropertyPixelHeight] as? Int) ?? 0
         let longEdge = max(w, h)
 
-        let sample = computeInSampleSize(longEdge: longEdge, maxDim: maxDim)
+        let sample = Int(PageSampling.shared.sampleSize(longEdge: Int32(longEdge), maxDim: Int32(maxDim)))
         // Target long edge after power-of-two sampling — equals Android's downsampled long edge.
         let targetLong = sample > 1 ? longEdge / sample : longEdge
 
@@ -68,15 +68,6 @@ final class PageLoader {
             return UIImage(cgImage: cg)
         }
         return UIImage(data: data) // fallback: full decode
-    }
-
-    /// Largest power-of-two sample factor keeping the long edge at or above [maxDim] — identical to
-    /// Android's computeInSampleSize, so both platforms downsample to the same dimensions.
-    private static func computeInSampleSize(longEdge: Int, maxDim: Int) -> Int {
-        if longEdge <= maxDim || longEdge <= 0 { return 1 }
-        var sample = 1
-        while longEdge / (sample * 2) >= maxDim { sample *= 2 }
-        return sample
     }
 
     private static func defaultCacheBytes() -> Int {

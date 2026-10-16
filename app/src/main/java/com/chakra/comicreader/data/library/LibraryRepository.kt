@@ -10,11 +10,15 @@ import android.util.Log
 import com.chakra.comicreader.data.archive.ComicArchiveFactory
 import com.chakra.comicreader.data.archive.ComicFormat
 import com.chakra.comicreader.data.archive.ComicFormatDetector
+import com.chakra.comicreader.data.archive.RarToCbz
 import com.chakra.comicreader.data.archive.UnsupportedComicException
 import com.chakra.comicreader.data.db.ComicDao
 import com.chakra.comicreader.data.db.ComicEntity
+import com.chakra.comicreader.data.page.PageSampling
 import com.chakra.comicreader.data.settings.AppSettings
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
@@ -73,7 +77,15 @@ class LibraryRepository(
                 } else {
                     dest.outputStream().use { out ->
                         out.write(head, 0, n)
-                        input.copyTo(out)
+                        // Chunked so a cancelled import (user taps the spinner) stops promptly
+                        // instead of finishing a multi-GB copy it will throw away.
+                        val buffer = ByteArray(COPY_CHUNK)
+                        while (true) {
+                            val r = input.read(buffer)
+                            if (r < 0) break
+                            out.write(buffer, 0, r)
+                            ensureActive()
+                        }
                     }
                 }
                 true
@@ -97,7 +109,30 @@ class LibraryRepository(
                 )
             }
 
-            val (pageCount, coverPath) = ComicArchiveFactory.open(dest).use { archive ->
+            // CBR → CBZ once, at import: solid RARs are O(page index) per read otherwise. If the
+            // conversion fails for any reason, keep the raw RAR (the legacy, slower, read path).
+            var stored = dest
+            var storedFormat = format
+            if (format == ComicFormat.CBR) {
+                val cbz = File(comicsDir, "$token-pages.cbz")
+                val converted = try {
+                    RarToCbz.convert(dest, cbz)
+                    true
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (t: Throwable) {
+                    Log.w(TAG, "CBR→CBZ conversion failed; keeping the RAR", t)
+                    cbz.delete()
+                    false
+                }
+                if (converted) {
+                    dest.delete()
+                    stored = cbz
+                    storedFormat = ComicFormat.CBZ
+                }
+            }
+
+            val (pageCount, coverPath) = ComicArchiveFactory.open(stored).use { archive ->
                 val count = archive.pageCount
                 if (count == 0) return@use 0 to null
                 val saved = runCatching { saveCover(archive.readPage(0), coverFile) }
@@ -106,7 +141,7 @@ class LibraryRepository(
             }
 
             if (pageCount == 0) {
-                dest.delete()
+                stored.delete()
                 return@withContext Result.failure(
                     UnsupportedComicException("This archive has no readable pages."),
                 )
@@ -116,9 +151,9 @@ class LibraryRepository(
             val id = dao.insert(
                 ComicEntity(
                     title = title,
-                    filePath = dest.absolutePath,
+                    filePath = stored.absolutePath,
                     coverPath = coverPath,
-                    format = format.name,
+                    format = storedFormat.name,
                     pageCount = pageCount,
                     rightToLeft = settings.defaultRightToLeft,
                     dateAdded = now,
@@ -129,9 +164,36 @@ class LibraryRepository(
         } catch (t: Throwable) {
             Log.e(TAG, "Import failed", t)
             dest.delete()
+            File(comicsDir, "$token-pages.cbz").delete()
             coverFile.delete()
+            if (t is CancellationException) throw t // cleaned up; let the cancellation propagate
             Result.failure(t)
         }
+    }
+
+    /**
+     * Converts comics imported as raw RARs (before import-time conversion existed) to CBZ in place,
+     * so existing libraries also get linear-time page reads. Failures leave the comic as it was.
+     */
+    suspend fun upgradeLegacyCbr() = withContext(Dispatchers.IO) {
+        comics.first()
+            .filter { it.format == ComicFormat.CBR.name }
+            .forEach { comic ->
+                val src = File(comic.filePath)
+                if (!src.exists() || ComicArchiveFactory.detectFormat(src) != ComicFormat.CBR) return@forEach
+                val out = File(src.parentFile, "${src.nameWithoutExtension}-pages.cbz")
+                try {
+                    RarToCbz.convert(src, out)
+                    dao.updateFile(comic.id, out.absolutePath, ComicFormat.CBZ.name)
+                    src.delete()
+                } catch (e: CancellationException) {
+                    out.delete()
+                    throw e
+                } catch (t: Throwable) {
+                    Log.w(TAG, "Could not upgrade ${comic.title} to CBZ", t)
+                    out.delete()
+                }
+            }
     }
 
     suspend fun deleteComic(id: Long) = withContext(Dispatchers.IO) {
@@ -157,11 +219,9 @@ class LibraryRepository(
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         BitmapFactory.decodeByteArray(pageBytes, 0, pageBytes.size, bounds)
         val longEdge = maxOf(bounds.outWidth, bounds.outHeight)
-        var sample = 1
-        while (longEdge > 0 && longEdge / (sample * 2) >= COVER_MAX_DIMENSION) sample *= 2
 
         val opts = BitmapFactory.Options().apply {
-            inSampleSize = sample
+            inSampleSize = PageSampling.sampleSize(longEdge, COVER_MAX_DIMENSION)
             inPreferredConfig = Bitmap.Config.RGB_565
         }
         val bitmap = BitmapFactory.decodeByteArray(pageBytes, 0, pageBytes.size, opts)
@@ -195,5 +255,6 @@ class LibraryRepository(
         private const val TAG = "LibraryRepository"
         private const val COVER_MAX_DIMENSION = 600
         private const val HEAD_BYTES = 8
+        private const val COPY_CHUNK = 64 * 1024
     }
 }

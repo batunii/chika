@@ -138,6 +138,39 @@ jobs:
             -sdk iphonesimulator -destination "id=$DEVICE" -derivedDataPath iosApp/build \
             ARCHS=arm64 CODE_SIGNING_ALLOWED=NO
 
+  # On-device tests on an emulator: the native 7-Zip library (real RAR/solid-RAR fixtures) and the
+  # real TFLite model — neither can load in the JVM unit tests. Informational until it has proven
+  # stable on GitHub's runners.
+  android-device-tests:
+    name: Android device tests (emulator)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Run connected tests
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          arch: x86_64
+          script: ./gradlew :app:connectedDebugAndroidTest --stacktrace
+
   # Builds the unsigned iOS app IPA. Sideload it onto a device with AltStore/Sideloadly (it is
   # signed at install time with the user's own Apple ID), or sign in a release pipeline later.
   ios-app:

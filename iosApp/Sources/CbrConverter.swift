@@ -27,11 +27,13 @@ enum CbrConverter {
             }
 
             // Stream image entries to disk (one entry in memory at a time), then order them.
-            let extracted = try CbrReader.extractEntries(
+            let all = try CbrReader.extractEntries(
                 at: source,
-                include: { ComicArchiveKt.isImageEntry(name: $0) },
+                include: { ComicPagesKt.isImageEntry(name: $0) },
                 into: staging
-            ).sorted { NaturalOrderComparator.shared.compare(a: $0.path, b: $1.path) < 0 }
+            )
+            let order = ComicPages.shared.orderedImageIndices(names: all.map { $0.path })
+            let extracted = order.map { all[$0.intValue] }
             guard !extracted.isEmpty else { throw ConversionError.noImages }
 
             // Rename to zero-padded, order-preserving names, then zip.

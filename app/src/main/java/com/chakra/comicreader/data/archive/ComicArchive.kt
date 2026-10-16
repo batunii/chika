@@ -5,7 +5,8 @@ package com.chakra.comicreader.data.archive
  *
  * Implementations read from a local file (comics are imported/copied into app storage on add) so
  * that page access is random-access and cheap. Pages are returned as raw encoded bytes; decoding to
- * a bitmap is the platform page loader's job.
+ * a bitmap is the platform page loader's job. Page selection and ordering come from the shared
+ * [ComicPages] so Android and iOS agree on what a page is and in which order they are read.
  */
 interface ComicArchive : AutoCloseable {
 
@@ -16,13 +17,5 @@ interface ComicArchive : AutoCloseable {
     fun readPage(index: Int): ByteArray
 }
 
-/** File extensions we treat as comic page images. */
-private val IMAGE_EXTENSIONS = setOf("jpg", "jpeg", "png", "webp", "gif", "bmp", "avif")
-
-/** True if [name] looks like an image entry we should render as a page. */
-fun isImageEntry(name: String): Boolean {
-    val clean = name.substringAfterLast('/').substringAfterLast('\\')
-    if (clean.startsWith(".") || clean.startsWith("__MACOSX")) return false
-    val ext = clean.substringAfterLast('.', "").lowercase()
-    return ext in IMAGE_EXTENSIONS
-}
+/** Thrown when one archive entry is larger than the largest page we are willing to hold in memory. */
+class PageTooLargeException(message: String) : java.io.IOException(message)

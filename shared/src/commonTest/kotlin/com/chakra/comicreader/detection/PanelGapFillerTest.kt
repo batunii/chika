@@ -60,4 +60,11 @@ class PanelGapFillerTest {
         // Reading order: the top region comes before the filled bottom one.
         assertTrue(regions.first().top <= regions.last().top)
     }
+
+    @Test
+    fun mostlyEmptyPageGetsNoInventedPanels() {
+        // A splash/credits page: one small detected panel (~4% of the page), the rest empty.
+        val panels = listOf(Panel(0.4f, 0.4f, 0.6f, 0.6f))
+        assertEquals(panels, PanelGapFiller.fill(panels))
+    }
 }

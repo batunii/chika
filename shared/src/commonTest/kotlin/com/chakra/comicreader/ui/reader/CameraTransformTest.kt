@@ -52,4 +52,19 @@ class CameraTransformTest {
         assertTrue(draw.left.isFinite())
         assertTrue(draw.top.isFinite())
     }
+
+    @Test
+    fun horizontalClampCentersWhenImageFitsAndBoundsWhenWider() {
+        assertNear(50f, clampPanHorizontal(pan = 999f, base = 0f, size = 100f, container = 200f))
+        assertNear(0f, clampPanHorizontal(pan = 500f, base = 0f, size = 300f, container = 200f))
+        assertNear(-100f, clampPanHorizontal(pan = -500f, base = 0f, size = 300f, container = 200f))
+    }
+
+    @Test
+    fun verticalClampKeepsASliverOnScreen() {
+        val keep = ReaderGestureConfig.minVisibleFraction * 100f // size 100 < container 400
+        assertNear(400f - keep, clampPanVertical(pan = 9999f, base = 0f, size = 100f, container = 400f))
+        assertNear(keep - 100f, clampPanVertical(pan = -9999f, base = 0f, size = 100f, container = 400f))
+        assertNear(10f, clampPanVertical(pan = 10f, base = 0f, size = 100f, container = 400f))
+    }
 }
