@@ -1,0 +1,118 @@
+# XcodeGen spec for Chika for Mac (native AppKit/SwiftUI, not Catalyst). The project is generated:
+#   cd macApp && xcodegen generate
+name: Chika
+options:
+  bundleIdPrefix: com.chakra
+  deploymentTarget:
+    macOS: "15.0"
+
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    MARKETING_VERSION: "0.2.1"
+    CURRENT_PROJECT_VERSION: "1"
+    # Ad hoc "Sign to Run Locally" so xcodebuild works without a team. For distribution set
+    # DEVELOPMENT_TEAM and CODE_SIGN_IDENTITY "Apple Development" (see README).
+    CODE_SIGN_IDENTITY: "-"
+    CODE_SIGN_STYLE: Manual
+
+packages:
+  ChikaCore:
+    path: ChikaCore
+  ZIPFoundation:
+    url: https://github.com/weichsel/ZIPFoundation
+    from: "0.9.19"
+  # libarchive's BSD-licensed C library (RAR5 reader) as a prebuilt xcframework. We take the raw
+  # `libarchive` C product, not the package's Swift wrapper: we only read CBR/RAR and repackage as CBZ.
+  SwiftArchive:
+    url: https://github.com/matteo-pacini/libarchive-for-swift
+    exactVersion: "1.0.0"
+
+targets:
+  Chika:
+    type: application
+    platform: macOS
+    sources:
+      - path: Sources
+      # Fonts stay a folder so ATSApplicationFontsPath can point at Contents/Resources/Fonts.
+      - path: Resources/Fonts
+        type: folder
+        buildPhase: resources
+      - path: Resources/Assets.xcassets
+      # In the sources (not copied raw) so Xcode compiles it to MangaPanelDetector.mlmodelc.
+      - path: Resources/MangaPanelDetector.mlpackage
+      - path: Resources/PrivacyInfo.xcprivacy
+        buildPhase: resources
+    dependencies:
+      - package: ChikaCore
+      - package: ZIPFoundation
+      - package: SwiftArchive
+        product: libarchive
+    info:
+      path: Info.plist
+      properties:
+        CFBundleDisplayName: Chika
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
+        # No encryption beyond the OS's, so App Store Connect uploads skip the export questionnaire.
+        ITSAppUsesNonExemptEncryption: false
+        LSApplicationCategoryType: public.app-category.books
+        ATSApplicationFontsPath: Fonts
+        CFBundleDocumentTypes:
+          - CFBundleTypeName: Comic Book Archive
+            CFBundleTypeRole: Viewer
+            LSHandlerRank: Alternate
+            LSItemContentTypes:
+              - com.chakra.comicreader.cbz
+              - com.chakra.comicreader.cbr
+              - public.zip-archive
+        # Exported (not Imported): the app OWNS these types, so the system knows .cbz is a zip and
+        # .cbr a data file; otherwise the file importer greys these files out as unselectable.
+        UTExportedTypeDeclarations:
+          - UTTypeIdentifier: com.chakra.comicreader.cbz
+            UTTypeDescription: Comic Book ZIP Archive
+            UTTypeConformsTo:
+              - public.zip-archive
+            UTTypeTagSpecification:
+              public.filename-extension:
+                - cbz
+          - UTTypeIdentifier: com.chakra.comicreader.cbr
+            UTTypeDescription: Comic Book RAR Archive
+            UTTypeConformsTo:
+              - public.data
+            UTTypeTagSpecification:
+              public.filename-extension:
+                - cbr
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.chakra.comicreader
+        CODE_SIGN_ENTITLEMENTS: Chika.entitlements
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+
+  ChikaTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - path: Tests
+      # Bundled rather than read from the repo: the host app is sandboxed.
+      - path: ../iosApp/ci/SyntheticManga.cbz
+        buildPhase: resources
+    dependencies:
+      - target: Chika
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+
+schemes:
+  Chika:
+    build:
+      targets:
+        Chika: all
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - ChikaTests
+    archive:
+      config: Release
