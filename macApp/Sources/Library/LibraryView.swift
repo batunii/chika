@@ -18,6 +18,10 @@ struct LibraryView: View {
     @State private var pendingDelete: URL?
     // Resume snapshot keyed by ReadingProgress.key, so cards show fresh progress without resetting scroll.
     @State private var progress: [String: Progress] = [:]
+    @State private var opened: [String: Double] = [:]
+    @State private var query = ""
+    @AppStorage("chika.library.sort") private var sort = LibraryStore.Sort.recent
+    @AppStorage("chika.library.unreadOnly") private var unreadOnly = false
 
     private let columns = [GridItem(.adaptive(minimum: 170, maximum: 220), spacing: 24)]
 
@@ -80,13 +84,29 @@ struct LibraryView: View {
         } message: {
             Text(pendingDelete.map(removalMessage) ?? "")
         }
-        .onAppear { progress = ReadingProgress.all() }
+        .onAppear { progress = ReadingProgress.all(); opened = ReadingProgress.openedMap() }
         // Reader windows save progress and recency on every step; keep cards and order live.
         .onReceive(NotificationCenter.default.publisher(for: ReadingProgress.didChange)) { _ in
-            library.refresh()
             progress = ReadingProgress.all()
+            opened = ReadingProgress.openedMap()
         }
         .onOpenURL { url in library.importComic(from: url) }
+    }
+
+    private var libraryControls: some View {
+        HStack(spacing: 10) {
+            TextField("Search title, series, writer", text: $query)
+                .textFieldStyle(.roundedBorder)
+                .frame(width: 220)
+            Picker("Sort", selection: $sort) {
+                ForEach(LibraryStore.Sort.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+            }
+            .fixedSize()
+            Toggle("Unread only", isOn: $unreadOnly)
+                .toggleStyle(.button)
+                .help("Hide comics read to the last page")
+        }
+        .font(.archivo(13))
     }
 
     private func removalLabel(_ url: URL) -> String {
@@ -184,13 +204,21 @@ struct LibraryView: View {
     private var comicGrid: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
-                HStack {
+                let groups = LibraryStore.arrange(library.comics, query: query, sort: sort, unreadOnly: unreadOnly,
+                                                  keys: library.keys, progress: progress, opened: opened, info: library.info)
+                let shown = groups.reduce(0) { $0 + $1.comics.count }
+                HStack(spacing: 14) {
                     KickerText("Your Library", size: 13, color: Chika.ochre)
-                    Spacer()
-                    Text("\(library.comics.count) \(library.comics.count == 1 ? "comic" : "comics")")
+                    Text(shown == library.comics.count
+                         ? "\(shown) \(shown == 1 ? "comic" : "comics")"
+                         : "\(shown) of \(library.comics.count)")
                         .font(.archivo(13)).foregroundColor(Chika.creamMuted)
+                    Spacer()
+                    libraryControls
                 }
-                let groups = LibraryStore.seriesGroups(library.comics, info: library.info)
+                if shown == 0 {
+                    Text("No comics match.").font(.archivo(14)).foregroundColor(Chika.creamMuted).padding(.vertical, 24)
+                }
                 ForEach(groups, id: \.series) { group in
                     // Section titles only once there is a series to tell apart.
                     if groups.count > 1 || group.series != nil {
@@ -200,7 +228,7 @@ struct LibraryView: View {
                     LazyVGrid(columns: columns, alignment: .leading, spacing: 28) {
                         ForEach(group.comics, id: \.self) { url in
                             Button { openWindow(id: "reader", value: url) } label: {
-                                ComicCard(url: url, progress: progress[ReadingProgress.key(url)], info: library.info[url])
+                                ComicCard(url: url, progress: library.keys[url].flatMap { progress[$0] }, info: library.info[url])
                             }
                             .buttonStyle(.plain)
                             .contextMenu {

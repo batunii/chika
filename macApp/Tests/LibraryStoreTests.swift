@@ -1,5 +1,6 @@
 import XCTest
 import ZIPFoundation
+import ChikaCore
 @testable import Chika
 
 @MainActor
@@ -113,5 +114,24 @@ final class LibraryStoreTests: XCTestCase {
         XCTAssertEqual(store.nextIssue(after: two), ten)
         XCTAssertNil(store.nextIssue(after: ten))
         XCTAssertNil(store.nextIssue(after: loose))
+    }
+
+    func testArrangeSearchesSortsAndHidesFinishedComics() {
+        let a = URL(fileURLWithPath: "/c/Alpha.cbz"), b = URL(fileURLWithPath: "/c/beta.cbz"), c = URL(fileURLWithPath: "/c/Gamma.cbz")
+        let keys = [a: "a", b: "b", c: "c"]
+        let progress = ["a": Progress(page: 9, step: -1, total: 10), "b": Progress(page: 1, step: -1, total: 10)]
+        let opened = ["b": 2.0, "c": 1.0]
+        let info = [c: ComicInfo(series: "Saga", writer: "Vaughan")]
+        func arrange(_ query: String, _ sort: LibraryStore.Sort, unreadOnly: Bool = false) -> [URL] {
+            LibraryStore.arrange([c, b, a], query: query, sort: sort, unreadOnly: unreadOnly, keys: keys,
+                                 progress: progress, opened: opened, info: info).flatMap(\.comics)
+        }
+        XCTAssertEqual(arrange("", .title), [a, b, c])
+        XCTAssertEqual(arrange("", .recent), [b, c, a])
+        XCTAssertEqual(arrange("", .unread), [c, b, a])
+        XCTAssertEqual(arrange("", .series), [c, a, b])   // the Saga section, then the rest
+        XCTAssertEqual(arrange("", .title, unreadOnly: true), [b, c])
+        XCTAssertEqual(arrange("vaughan", .title), [c])
+        XCTAssertEqual(arrange("BET", .title), [b])
     }
 }

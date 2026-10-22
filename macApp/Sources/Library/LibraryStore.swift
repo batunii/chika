@@ -15,6 +15,8 @@ final class LibraryStore: ObservableObject {
     @Published private(set) var comics: [URL] = []
     @Published var importing = false
     @Published var importError: String?
+    /// Each comic's ReadingProgress key, read once per scan rather than on every render.
+    @Published private(set) var keys: [URL: String] = [:]
     /// ComicInfo.xml metadata of the comics that have it, filled in the background after a scan.
     @Published private(set) var info: [URL: ComicInfo] = [:]
     /// For comics read in place: the bookmarked file or watched folder each one came from.
@@ -81,15 +83,8 @@ final class LibraryStore: ObservableObject {
                 files.append(url)
             }
         }
-        let opened = ReadingProgress.openedMap()
         comics = files
-            .map { ($0, opened[ReadingProgress.key($0)] ?? 0) }
-            // Most-recently-opened first (Android's `ORDER BY lastOpened DESC`), then natural filename.
-            .sorted {
-                if $0.1 != $1.1 { return $0.1 > $1.1 }
-                return $0.0.lastPathComponent.localizedStandardCompare($1.0.lastPathComponent) == .orderedAscending
-            }
-            .map(\.0)
+        keys = Dictionary(files.map { ($0, ReadingProgress.key($0)) }, uniquingKeysWith: { a, _ in a })
         readInfo()
     }
 
@@ -163,6 +158,39 @@ final class LibraryStore: ObservableObject {
             .map { urls in (series: info[urls[0]]?.series, comics: urls.sorted { ComicInfo.issueOrder(info[$0]!, info[$1]!) }) }
             .sorted { $0.series!.localizedStandardCompare($1.series!) == .orderedAscending }
         return loose.isEmpty ? series : series + [(nil, loose)]
+    }
+
+    // MARK: - Search, sort, filter
+
+    enum Sort: String, CaseIterable { case recent = "Recent", title = "Title", series = "Series", unread = "Unread" }
+
+    /// What the grid shows: comics matching `query` (title, series or writer), optionally only the
+    /// unfinished ones, ordered by `sort`. Series sort returns series sections; the rest one nil section.
+    static func arrange(_ comics: [URL], query: String, sort: Sort, unreadOnly: Bool, keys: [URL: String],
+                        progress: [String: Progress], opened: [String: Double],
+                        info: [URL: ComicInfo]) -> [(series: String?, comics: [URL])] {
+        let title = { (url: URL) in url.deletingPathExtension().lastPathComponent }
+        let read = { (url: URL) -> Double in
+            guard let p = keys[url].flatMap({ progress[$0] }), p.total > 0 else { return 0 }
+            return Double(p.page + 1) / Double(p.total)
+        }
+        let query = query.trimmingCharacters(in: .whitespaces)
+        let shown = comics
+            .filter { url in
+                query.isEmpty || [title(url), info[url]?.series, info[url]?.writer].contains { $0?.localizedCaseInsensitiveContains(query) == true }
+            }
+            .filter { !unreadOnly || read($0) < 1 }
+            .sorted { title($0).localizedStandardCompare(title($1)) == .orderedAscending }
+        switch sort {
+        case .series: return seriesGroups(shown, info: info)
+        case .title: return [(nil, shown)]
+        // Stable sorts over the title order, so ties stay alphabetical.
+        case .recent:
+            let time = { (url: URL) in keys[url].flatMap { opened[$0] } ?? 0 }
+            return [(nil, shown.enumerated().sorted { (time($0.1), -$0.0) > (time($1.1), -$1.0) }.map(\.1))]
+        case .unread:
+            return [(nil, shown.enumerated().sorted { (read($0.1), $0.0) < (read($1.1), $1.0) }.map(\.1))]
+        }
     }
 
     // MARK: - Read in place
