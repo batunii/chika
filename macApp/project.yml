@@ -48,6 +48,7 @@ targets:
       - package: ZIPFoundation
       - package: SwiftArchive
         product: libarchive
+      - target: ChikaThumbnails   # embedded in Contents/PlugIns
     info:
       path: Info.plist
       properties:
@@ -97,6 +98,39 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.chakra.comicreader
         CODE_SIGN_ENTITLEMENTS: Chika.entitlements
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+
+  ChikaThumbnails:
+    type: app-extension
+    platform: macOS
+    # Shares the app's archive readers rather than a framework: two files are not worth one.
+    sources:
+      - path: Thumbnails/ThumbnailProvider.swift
+      - path: Sources/Archive/CbzArchive.swift
+      - path: Sources/Archive/CbrReader.swift
+    dependencies:
+      - package: ChikaCore
+      - package: ZIPFoundation
+      - package: SwiftArchive
+        product: libarchive
+    info:
+      path: Thumbnails/Info.plist
+      properties:
+        CFBundleDisplayName: Chika Thumbnails
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.quicklook.thumbnail
+          NSExtensionPrincipalClass: "$(PRODUCT_MODULE_NAME).ThumbnailProvider"
+          NSExtensionAttributes:
+            QLSupportedContentTypes:
+              - com.chakra.comicreader.cbz
+              - com.chakra.comicreader.cbr
+              - com.chakra.comicreader.cb7
+            QLThumbnailMinimumDimension: 0
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.chakra.comicreader.thumbnails
+        CODE_SIGN_ENTITLEMENTS: Thumbnails/Thumbnails.entitlements
 
   ChikaTests:
     type: bundle.unit-test

@@ -47,6 +47,18 @@ sandboxed; this is the same folder and bundle id the Catalyst app used, so its l
   container, keyed by file identity (volume UUID + inode), so renaming a comic keeps its place. The
   first launch copies the old UserDefaults progress over and leaves it for the Catalyst app.
 
+## Finder thumbnails (Quick Look)
+
+The app embeds `ChikaThumbnails.appex`, which draws a comic's cover as its Finder icon for .cbz,
+.cbr and .cb7. macOS picks it up once it knows the app: run Chika from `/Applications`, or register
+a build in place and reset Quick Look:
+
+```sh
+/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f -R build/Build/Products/Debug/Chika.app
+qlmanage -r
+qlmanage -t -x -s 256 -o /tmp SomeComic.cbz     # writes /tmp/SomeComic.cbz.png
+```
+
 ## Signing
 
 Local builds sign ad hoc (`CODE_SIGN_IDENTITY: "-"`), so no team is needed. To sign with your
