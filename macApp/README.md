@@ -142,6 +142,12 @@ Each export writes every corrected page again over the same names; export into a
 than over an old one, so a page you have since reset to detection, or a comic whose name changed,
 leaves no stale files behind.
 
+## Peek window
+
+⇧⌘P floats the current panel in a small always-on-top window with no frame or title bar. Drag it
+by the panel, resize it from its edges. Hovering shows a frosted bar across the top: minimize,
+previous/next panel, auto-advance, window opacity, and back to the full reader.
+
 ## Peek auto-advance
 
 The peek window (⇧⌘P) can read by itself: the play button in its hover bar, or P while it is

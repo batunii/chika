@@ -3,8 +3,9 @@ import AppKit
 import ChikaCore
 
 /// Floating "peek" window: only the current panel of the comic's shared ReaderModel, no chrome, so
-/// you can keep reading in a small always-on-top window while working in another app. A bar fades
-/// in on hover with panel steps, auto-advance, window opacity, minimize, and expand back to the full reader.
+/// you can keep reading in a small always-on-top window while working in another app. The window has
+/// no border; a frosted bar fades in across the top on hover with minimize, panel steps,
+/// auto-advance, window opacity, and expand back to the full reader.
 struct PeekView: View {
     let comicURL: URL
     @EnvironmentObject private var readers: ReaderModels
@@ -73,7 +74,8 @@ private struct PeekContent: View {
             .clipped()
         }
         .background(settings.ground)
-        .overlay(alignment: .bottom) { bar.opacity(hovering ? 1 : 0) }
+        .overlay(alignment: .top) { bar.opacity(hovering ? 1 : 0) }
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
         .onHover { inside in withAnimation(.easeOut(duration: 0.2)) { hovering = inside } }
         .background(PeekWindowConfigurator(aspect: aspect, opacity: opacity, window: $window))
         .frame(minWidth: 240, idealWidth: 420, minHeight: 160, idealHeight: 420 * aspect.height / aspect.width)
@@ -119,6 +121,8 @@ private struct PeekContent: View {
 
     private var bar: some View {
         HStack(spacing: 12) {
+            Button { window?.miniaturize(nil) } label: { Label("Minimize", systemImage: "minus") }
+                .help("Minimize")
             Button { model.advance(by: -1) } label: { Label("Previous panel", systemImage: "chevron.left") }
                 .help("Previous panel (Left Arrow)")
             Button { model.advance(by: 1) } label: { Label("Next panel", systemImage: "chevron.right") }
@@ -139,8 +143,6 @@ private struct PeekContent: View {
                 .help("Window opacity")
                 .accessibilityLabel("Window opacity")
             Spacer(minLength: 0)
-            Button { window?.miniaturize(nil) } label: { Label("Minimize", systemImage: "minus") }
-                .help("Minimize")
             Button {
                 openWindow(id: "reader", value: model.comicURL)
                 dismissWindow(id: "peek", value: model.comicURL)
@@ -152,8 +154,8 @@ private struct PeekContent: View {
         .font(.system(size: 13, weight: .semibold))
         .foregroundColor(Chika.cream)
         .padding(.horizontal, 12).padding(.vertical, 8)
-        .background(LinearGradient(colors: [.clear, Chika.ink.opacity(0.9)],
-                                   startPoint: .top, endPoint: .bottom))
+        .background(.ultraThinMaterial)
+        .environment(\.colorScheme, .dark)   // the frosted glass stays dark over light pages
     }
 }
 
@@ -175,7 +177,10 @@ private struct PeekWindowConfigurator: NSViewRepresentable {
                 window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
                 window.hidesOnDeactivate = false
                 window.isMovableByWindowBackground = true
-                window.titlebarAppearsTransparent = true
+                // A plain window is borderless: keep it resizable from its edges and let it take keys
+                // (arrows, Space, P, ⌘C) and minimize like a titled one.
+                window.styleMask.formUnion([.resizable, .miniaturizable])
+                window.hasShadow = true
                 self.window = window
             }
             if window.aspectRatio != aspect {
