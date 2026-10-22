@@ -107,7 +107,8 @@ focused, steps one panel (a spread in Two pages, where the peek shows both pages
 every few seconds. The stepper next to it sets the wait, 2 to 20 seconds (5 by default, remembered
 app-wide; its tooltip shows the current value). Any step, by hand or by the timer, starts the wait
 again; a page whose panels are still being detected is held until they land; playing stops by itself
-at the end of the comic, or if the comic could not be opened.
+at the end of the comic, if the comic could not be opened, or when the peek is minimized or Chika
+is hidden (⌘H), so it never reads on where you cannot see it.
 
 ## Where the library lives
 

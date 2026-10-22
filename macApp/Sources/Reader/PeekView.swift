@@ -91,11 +91,17 @@ private struct PeekContent: View {
         .onKeyPress("p", phases: .down) { _ in playing.toggle(); return .handled }
         // Any move, manual or automatic (or a new dwell time), changes the id and so restarts the wait.
         .task(id: playing ? [model.slots.page, model.slots.step, seconds] : []) { try? await autoAdvance() }
+        // Out of sight (minimized, or Chika hidden with ⌘H) the task keeps running, so stop rather than read on unseen.
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didMiniaturizeNotification)) { note in
+            if (note.object as? NSWindow) === window { playing = false }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didHideNotification)) { _ in playing = false }
     }
 
     /// While playing: wait the dwell, then step once. Stops at the end of the book.
     private func autoAdvance() async throws {
         guard playing else { return }
+        // shortcut: each auto step saves progress and refreshes the library window, batch saves while playing if that shows up
         // Clamped: the stored value can be edited outside the app, and 0 would race to the last page.
         try await Task.sleep(for: .seconds(min(max(seconds, 2), 20)))
         while model.advance(by: 1) == .blocked {
@@ -118,7 +124,7 @@ private struct PeekContent: View {
                 Label(playing ? "Pause auto-advance" : "Auto-advance", systemImage: playing ? "pause.fill" : "play.fill")
             }
                 .help(playing ? "Pause auto-advance (P)" : "Auto-advance: next panel every \(seconds) s (P)")
-            // Label hidden: at the 240 pt minimum width it truncates and squeezes the opacity slider.
+            // shortcut: value only in the tooltip (label truncates at 240 pt), show it inline if the bar gets wider
             Stepper(value: $seconds, in: 2...20) { Text("\(seconds) s") }
                 .labelsHidden()
                 .help("Seconds per panel when auto-advancing: \(seconds) s")
