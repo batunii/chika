@@ -43,6 +43,7 @@ private struct PeekContent: View {
                     Image(decorative: cg, scale: 1)
                         .resizable()
                         .frame(width: CGFloat(cg.width), height: CGFloat(cg.height))
+                        .modifier(NightFilterEffect(filter: settings.nightFilter))   // peek dims the whole panel
                         .modifier(CameraFraming(
                             camL: CGFloat(camera.left), camT: CGFloat(camera.top),
                             camR: CGFloat(camera.right), camB: CGFloat(camera.bottom),

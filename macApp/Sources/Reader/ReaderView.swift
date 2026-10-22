@@ -71,7 +71,7 @@ private struct ReaderContent: View {
                 .keyboardShortcut(.escape, modifiers: [])
             }
         }
-        // Page turns have no visible button; these invisible ones carry ⌘[ / ⌘].
+        // Page turns have no visible button; these invisible ones carry ⌘[ / ⌘], the modes and ⌥⌘N.
         .background {
             Group {
                 Button("Previous page") { model.turnPage(next: false) }
@@ -82,6 +82,8 @@ private struct ReaderContent: View {
                     Button(mode.title) { model.setMode(mode) }
                         .keyboardShortcut(KeyEquivalent(Character("\(i + 1)")), modifiers: .command)
                 }
+                Button("Next night filter") { settings.nightFilter = settings.nightFilter.next }
+                    .keyboardShortcut("n", modifiers: [.command, .option])
             }
             .opacity(0)
             .accessibilityHidden(true)
@@ -162,11 +164,22 @@ private struct ReaderContent: View {
         // the shared computePageDraw per frame — so stepping between panels TWEENS the camera the
         // way Android's Animatable camera does (a Canvas can't animate; it jump-cuts).
         let camera = model.slots.camera
+        let filter = settings.nightFilter
         return ZStack(alignment: .topLeading) {
             if let cg = model.image {
                 Image(decorative: cg, scale: 1)
                     .resizable()
                     .frame(width: CGFloat(cg.width), height: CGFloat(cg.height))
+                    // Here dim darkens around the panel instead: drawn in page coordinates under the
+                    // same transform, so it stays on the panel through camera tweens, zoom and pan.
+                    .modifier(NightFilterEffect(filter: filter == .dim ? .off : filter))
+                    .overlay {
+                        if filter == .dim {
+                            OutsideCamera(camera: CGRect(x: CGFloat(camera.left), y: CGFloat(camera.top),
+                                                         width: CGFloat(camera.width), height: CGFloat(camera.height)))
+                                .fill(Color.black.opacity(0.6), style: FillStyle(eoFill: true))
+                        }
+                    }
                     .modifier(CameraFraming(
                         camL: CGFloat(camera.left), camT: CGFloat(camera.top),
                         camR: CGFloat(camera.right), camB: CGFloat(camera.bottom),
@@ -186,6 +199,7 @@ private struct ReaderContent: View {
                 Image(decorative: page, scale: 1).resizable().scaledToFit()
             }
         }
+        .modifier(NightFilterEffect(filter: settings.nightFilter))
         .frame(maxWidth: size.width * 0.98, maxHeight: size.height * 0.98)
         .scaleEffect(zoom)
         .offset(pan)
@@ -261,6 +275,22 @@ private struct ReaderContent: View {
             .fixedSize()
             .help("Reading mode: ⌘1 panels, ⌘2 two pages, ⌘3 scroll")
             .accessibilityLabel("Reading mode")
+            Menu {
+                Picker("Night filter", selection: $settings.nightFilter) {
+                    ForEach(NightFilter.allCases, id: \.self) { Text($0.title).tag($0) }
+                }
+                .pickerStyle(.inline)
+            } label: {
+                Image(systemName: settings.nightFilter == .off ? "moon" : "moon.fill")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundColor(Chika.cream)
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .help("Night filter: invert, sepia or dim the pages (⌥⌘N cycles)")
+            .accessibilityLabel("Night filter")
+            .accessibilityValue(settings.nightFilter.title)
             DirectionChip(rightToLeft: model.rightToLeft) { model.toggleDirection() }
             Button { openWindow(id: "peek", value: model.comicURL) } label: {
                 Image(systemName: "pip.enter")
@@ -408,11 +438,16 @@ private struct ScrollPage: View {
     let index: Int
     let width: CGFloat
     let atTop: (Int) -> Void
+    @EnvironmentObject private var settings: ChikaSettings
     @State private var image: CGImage?
 
     var body: some View {
         ZStack {
-            if let image { Image(decorative: image, scale: 1).resizable() } else { ProgressView().tint(Chika.ochre) }
+            if let image {
+                Image(decorative: image, scale: 1).resizable().modifier(NightFilterEffect(filter: settings.nightFilter))
+            } else {
+                ProgressView().tint(Chika.ochre)
+            }
         }
         .frame(width: width, height: width * aspect)
         .task(id: index) { image = await model.scrollImage(index) }
@@ -474,6 +509,39 @@ struct CameraFraming: GeometryEffect {
         let top = cy + (CGFloat(draw.top) - cy) * zoom + panY
         return ProjectionTransform(
             CGAffineTransform(translationX: left, y: top).scaledBy(x: s * zoom, y: s * zoom))
+    }
+}
+
+/// A night filter's colour change, for page pixels only (reader and peek). Dim darkens the whole
+/// page; Panels mode dims around the camera with OutsideCamera instead.
+struct NightFilterEffect: ViewModifier {
+    let filter: NightFilter
+
+    func body(content: Content) -> some View {
+        switch filter {
+        case .off: content
+        case .invert: content.colorInvert().hueRotation(.degrees(180))   // dark pages, hues kept
+        case .sepia: content.grayscale(1).colorMultiply(Color(hex: 0xF0D4A8))
+        case .dim: content.colorMultiply(Color(white: 0.6))   // scales, so dark detail survives
+        }
+    }
+}
+
+/// The page outside the camera, as an even-odd path in page coordinates. Animatable, so it tweens
+/// with the camera instead of jumping to the next panel.
+struct OutsideCamera: Shape {
+    var camera: CGRect   // unit page coordinates, like Panel
+
+    var animatableData: CGRect.AnimatableData {
+        get { camera.animatableData }
+        set { camera.animatableData = newValue }
+    }
+
+    func path(in rect: CGRect) -> Path {
+        var path = Path(rect)
+        path.addRect(CGRect(x: rect.minX + camera.minX * rect.width, y: rect.minY + camera.minY * rect.height,
+                            width: camera.width * rect.width, height: camera.height * rect.height))
+        return path
     }
 }
 

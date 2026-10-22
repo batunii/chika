@@ -1,8 +1,8 @@
 import SwiftUI
 
 /// Chika settings / about (⌘,): the port of the iOS MenuView (itself Android's MenuScreen.kt).
-/// Holds the AMOLED theme toggle, the default reading direction and the about/support section, over
-/// the ink ground with a faint crimson halftone.
+/// Holds the AMOLED theme toggle, the night filter, the default reading direction and the
+/// about/support section, over the ink ground with a faint crimson halftone.
 struct SettingsView: View {
     @EnvironmentObject private var settings: ChikaSettings
 
@@ -36,6 +36,26 @@ struct SettingsView: View {
                         subtitle: "True-black background, easy on OLED screens and battery.",
                         isOn: $settings.amoled
                     )
+                    Spacer().frame(height: 10)
+                    HStack(spacing: 12) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Night filter").font(.archivo(14, weight: 700)).foregroundColor(Chika.cream)
+                            Text("Changes the pages, not the app, for reading late. ⌥⌘N cycles it in the reader.")
+                                .font(.archivo(10.5, weight: 500)).lineSpacing(3).foregroundColor(Chika.creamMuted)
+                        }
+                        Spacer(minLength: 0)
+                        Picker("Night filter", selection: $settings.nightFilter) {
+                            ForEach(NightFilter.allCases, id: \.self) { Text($0.title).tag($0) }
+                        }
+                        .pickerStyle(.segmented)
+                        .labelsHidden()
+                        .fixedSize()
+                        .help("Invert, sepia or dim the reader's pages (dim darkens around the panel in Panels mode)")
+                        .accessibilityLabel("Night filter")
+                    }
+                    .padding(.init(top: 12, leading: 16, bottom: 12, trailing: 10))
+                    .background(Chika.inkSoft)
+                    .clipShape(RoundedCornerShape(cornerRadius: 6))
 
                     Spacer().frame(height: 24)
 

@@ -43,6 +43,16 @@ Each comic remembers its mode (the book/grid menu in the reader's top bar):
 - **Scroll** (⌘3): every page in one vertical strip at the window's width, for webtoons. Swipe or
   use ← → / Space / Page Up/Down to move most of a screen; ⌘[ ⌘] and the scrubber jump to a page.
 
+## Night filters
+
+For reading late, the moon menu in the reader's top bar (or Settings, ⌘,) changes the pages, never
+the app's own controls. ⌥⌘N cycles it in the reader. The choice is app-wide, not per comic.
+
+- **Invert**: dark pages with the colours' hues kept.
+- **Sepia**: warm monochrome.
+- **Dim**: in Panels mode, darkens the page around the current panel (on the whole page nothing
+  is darkened); in Two pages, Scroll and the peek window it lowers the whole page's brightness.
+
 ## Where the library lives
 
 - **Imported copies** (⌘O, or files dropped on the window) go to the Comics folder above. CBZ,
