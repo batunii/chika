@@ -145,8 +145,10 @@ leaves no stale files behind.
 ## Peek window
 
 ⇧⌘P floats the current panel in a small always-on-top window with no frame or title bar. Drag it
-by the panel, resize it from its edges. Hovering shows a frosted bar across the top: minimize,
-previous/next panel, auto-advance, window opacity, and back to the full reader.
+by the panel, resize it from its edges. Hovering fades in its controls as floating Liquid Glass
+pieces (frosted material before macOS 26): minimize on the left, previous/next panel, auto-advance,
+seconds per panel and window opacity in the middle (the last two hide when the window is narrow),
+and back to the full reader on the right.
 
 ## Peek auto-advance
 

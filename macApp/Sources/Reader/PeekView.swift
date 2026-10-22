@@ -4,8 +4,8 @@ import ChikaCore
 
 /// Floating "peek" window: only the current panel of the comic's shared ReaderModel, no chrome, so
 /// you can keep reading in a small always-on-top window while working in another app. The window has
-/// no border; a frosted bar fades in across the top on hover with minimize, panel steps,
-/// auto-advance, window opacity, and expand back to the full reader.
+/// no border; on hover its controls fade in over the top as floating glass pieces: minimize, panel
+/// steps, auto-advance, window opacity, and expand back to the full reader.
 struct PeekView: View {
     let comicURL: URL
     @EnvironmentObject private var readers: ReaderModels
@@ -119,43 +119,75 @@ private struct PeekContent: View {
         }
     }
 
+    /// Hover controls floating over the panel as separate glass pieces, no bar: minimize on the left,
+    /// reading controls in the middle (the stepper and opacity drop out when the window is narrow),
+    /// back to the full reader on the right.
     private var bar: some View {
+        HStack(alignment: .center, spacing: 8) {
+            glassCircle("Minimize", "minus", help: "Minimize") { window?.miniaturize(nil) }
+            Spacer(minLength: 0)
+            ViewThatFits(in: .horizontal) {
+                readingControls(full: true)
+                readingControls(full: false)
+            }
+            Spacer(minLength: 0)
+            glassCircle("Open full reader", "arrow.up.left.and.arrow.down.right", help: "Back to the full reader") {
+                openWindow(id: "reader", value: model.comicURL)
+                dismissWindow(id: "peek", value: model.comicURL)
+            }
+        }
+        .labelStyle(.iconOnly)
+        .buttonStyle(.plain)
+        .font(.system(size: 12, weight: .semibold))
+        .foregroundColor(Chika.cream)
+        .padding(8)
+        .environment(\.colorScheme, .dark)   // dark glass keeps the icons readable over white pages
+    }
+
+    private func readingControls(full: Bool) -> some View {
         HStack(spacing: 12) {
-            Button { window?.miniaturize(nil) } label: { Label("Minimize", systemImage: "minus") }
-                .help("Minimize")
             Button { model.advance(by: -1) } label: { Label("Previous panel", systemImage: "chevron.left") }
                 .help("Previous panel (Left Arrow)")
-            Button { model.advance(by: 1) } label: { Label("Next panel", systemImage: "chevron.right") }
-                .help("Next panel (Right Arrow)")
             Button { playing.toggle() } label: {
                 Label(playing ? "Pause auto-advance" : "Auto-advance", systemImage: playing ? "pause.fill" : "play.fill")
             }
                 .help(playing ? "Pause auto-advance (P)" : "Auto-advance: next panel every \(seconds) s (P)")
-            // shortcut: value only in the tooltip (label truncates at 240 pt), show it inline if the bar gets wider
-            Stepper(value: $seconds, in: 2...20) { Text("\(seconds) s") }
-                .labelsHidden()
-                .help("Seconds per panel when auto-advancing: \(seconds) s")
-                .accessibilityLabel("Seconds per panel")
-                .accessibilityValue("\(seconds) seconds")
-            Slider(value: $opacity, in: 0.4...1)
-                .tint(Chika.ochre)
-                .frame(maxWidth: 110)
-                .help("Window opacity")
-                .accessibilityLabel("Window opacity")
-            Spacer(minLength: 0)
-            Button {
-                openWindow(id: "reader", value: model.comicURL)
-                dismissWindow(id: "peek", value: model.comicURL)
-            } label: { Label("Open full reader", systemImage: "arrow.up.left.and.arrow.down.right") }
-                .help("Back to the full reader")
+            Button { model.advance(by: 1) } label: { Label("Next panel", systemImage: "chevron.right") }
+                .help("Next panel (Right Arrow)")
+            if full {
+                Stepper(value: $seconds, in: 2...20) { Text("\(seconds) s") }
+                    .labelsHidden()
+                    .controlSize(.mini)
+                    .help("Seconds per panel when auto-advancing: \(seconds) s")
+                    .accessibilityLabel("Seconds per panel")
+                    .accessibilityValue("\(seconds) seconds")
+                Slider(value: $opacity, in: 0.4...1)
+                    .controlSize(.mini)
+                    .tint(Chika.ochre)
+                    .frame(width: 64)
+                    .help("Window opacity")
+                    .accessibilityLabel("Window opacity")
+            }
         }
-        .labelStyle(.iconOnly)
-        .buttonStyle(.plain)
-        .font(.system(size: 13, weight: .semibold))
-        .foregroundColor(Chika.cream)
-        .padding(.horizontal, 12).padding(.vertical, 8)
-        .background(.ultraThinMaterial)
-        .environment(\.colorScheme, .dark)   // the frosted glass stays dark over light pages
+        .padding(.horizontal, 12).frame(height: 28)
+        .liquidGlass(Capsule())
+    }
+
+    private func glassCircle(_ title: String, _ icon: String, help: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) { Label(title, systemImage: icon).frame(width: 28, height: 28).contentShape(Circle()) }
+            .liquidGlass(Circle())
+            .help(help)
+    }
+}
+
+private extension View {
+    /// Liquid Glass on macOS 26; a frosted material on macOS 15.
+    @ViewBuilder func liquidGlass(_ shape: some Shape) -> some View {
+        if #available(macOS 26.0, *) {
+            glassEffect(.regular.interactive(), in: shape)
+        } else {
+            background(.ultraThinMaterial, in: shape)
+        }
     }
 }
 
