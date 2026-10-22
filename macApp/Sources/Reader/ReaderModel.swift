@@ -109,10 +109,12 @@ final class ReaderModel: ObservableObject {
     private func loadPage() {
         guard let loader else { return }
         // Known panels apply at once (resolving a backward turn's outro); unknown ones stay nil and
-        // block stepping until detection lands.
+        // block stepping until detection lands. A bookmark's panel waits for its page's image, so the
+        // camera never frames it on the page still on screen.
         if mode == .panels {
             overrides[slots.page] = ReadingProgress.panelOverride(comicURL, page: slots.page)
-            if let known = overrides[slots.page] ?? panelCache[slots.page] { slots.setRegions(known) }
+            if let known = overrides[slots.page] ?? panelCache[slots.page],
+               slots.step == -1 || slots.step == ReaderSlots.outroSentinel { slots.setRegions(known) }
         }
         detecting = false
         pageAlpha = 0.35   // fades up to 1 once the page renders
@@ -135,8 +137,11 @@ final class ReaderModel: ObservableObject {
                 guard self.mode == .panels else { self.prefetchSpread(after: pages.last!); return }
                 let img = images[0]
                 if self.slots.regions == nil {
-                    // An undecodable page reads as one whole-page region so the reader can step past it.
-                    if img == nil { self.slots.setRegions([.fullPage]) } else { self.redetect() }
+                    // A bookmark's known panels glide in now. An undecodable page reads as one
+                    // whole-page region so the reader can step past it.
+                    if let known = self.overrides[target] ?? self.panelCache[target] {
+                        withAnimation(Self.cameraTween) { self.slots.setRegions(known) }
+                    } else if img == nil { self.slots.setRegions([.fullPage]) } else { self.redetect() }
                 }
                 self.prefetch(target + 1)
             }
