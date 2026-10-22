@@ -53,6 +53,15 @@ the app's own controls. ⌥⌘N cycles it in the reader. The choice is app-wide,
 - **Dim**: in Panels mode, darkens the page around the current panel (on the whole page nothing
   is darkened); in Two pages, Scroll and the peek window it lowers the whole page's brightness.
 
+## Bookmarks
+
+⌘D bookmarks where you are, or removes the bookmark if there is one: the panel in Panels mode
+(the page when the whole page shows), the spread's first page in Two pages, the top page in Scroll.
+The bookmark menu in the top bar is filled when the current spot is bookmarked; it lists the comic's
+bookmarks in page order ("Page 4 · panel 2") and picking one jumps there (in Two pages and Scroll,
+to its page). Bookmarks live next to the progress in the same database and go when the comic is
+deleted from the library.
+
 ## Where the library lives
 
 - **Imported copies** (⌘O, or files dropped on the window) go to the Comics folder above. CBZ,

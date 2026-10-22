@@ -13,6 +13,13 @@ struct Progress: Codable, Equatable {
     var mode: String?  // ReadingMode raw value; nil = never chosen → panels
 }
 
+/// A spot the reader marked in a comic: a page and its panel (-1 = the whole page).
+struct Bookmark: Hashable {
+    var page: Int
+    // shortcut: step is a panel index in the reading direction at the time; a direction flip moves it to another panel. Store the panel's rect if that bites.
+    var step: Int
+}
+
 /// Progress and last-opened time in one small SQLite table keyed by file identity (volume UUID +
 /// inode), so a comic keeps its place when it is renamed or moved on its volume. Not
 /// `fileResourceIdentifierKey`: Apple documents that one as not persistent across restarts.
@@ -64,6 +71,7 @@ enum ReadingProgress {
     /// Call before the file is gone: the key comes from the file itself.
     static func clear(_ url: URL) {
         run("DELETE FROM progress WHERE id = ?", [key(url)])
+        run("DELETE FROM bookmarks WHERE id = ?", [key(url)])
         changed()
     }
 
@@ -85,6 +93,27 @@ enum ReadingProgress {
             map[String(cString: sqlite3_column_text(row, 0))] = sqlite3_column_double(row, 1)
         }
         return map
+    }
+
+    // MARK: - Bookmarks
+
+    /// A comic's bookmarks in reading order.
+    static func bookmarks(_ url: URL) -> [Bookmark] {
+        var marks: [Bookmark] = []
+        run("SELECT page, step FROM bookmarks WHERE id = ? ORDER BY page, step", [key(url)]) { row in
+            marks.append(Bookmark(page: Int(sqlite3_column_int64(row, 0)), step: Int(sqlite3_column_int64(row, 1))))
+        }
+        return marks
+    }
+
+    /// Adds the bookmark at (page, step), or removes it if it is already there.
+    static func toggleBookmark(_ url: URL, page: Int, step: Int) {
+        guard let db else { return }
+        let args: [Any?] = [key(url), page, step]
+        run("DELETE FROM bookmarks WHERE id = ? AND page = ? AND step = ?", args)
+        if sqlite3_changes(db) == 0 {
+            run("INSERT INTO bookmarks(id, page, step, created) VALUES(?, ?, ?, ?)", args + [Date().timeIntervalSince1970])
+        }
     }
 
     // MARK: - Migration
@@ -123,6 +152,7 @@ enum ReadingProgress {
         sqlite3_exec(handle, """
             PRAGMA journal_mode = WAL;
             CREATE TABLE IF NOT EXISTS progress(id TEXT PRIMARY KEY, page INTEGER, step INTEGER, total INTEGER, rtl INTEGER, opened REAL);
+            CREATE TABLE IF NOT EXISTS bookmarks(id TEXT, page INTEGER, step INTEGER, created REAL, PRIMARY KEY(id, page, step));
             """, nil, nil, nil)
         // Added in phase 3; fails harmlessly once the column exists.
         sqlite3_exec(handle, "ALTER TABLE progress ADD COLUMN mode TEXT", nil, nil, nil)

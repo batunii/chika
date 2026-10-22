@@ -34,6 +34,7 @@ final class ReaderModel: ObservableObject {
     @Published private(set) var detecting = false
     @Published private(set) var pageAlpha: Double = 1   // per-page fade-in (Android's 280ms)
     @Published var rightToLeft: Bool
+    @Published private(set) var bookmarks: [Bookmark]
     private(set) var pageCount = 1
     var title: String { comicURL.deletingPathExtension().lastPathComponent }
 
@@ -50,12 +51,15 @@ final class ReaderModel: ObservableObject {
         mode == .spread ? Spreads.spread(containing: slots.page, pageCount: pageCount, wide: widePages) : [slots.page]
     }
     var onLastPage: Bool { visiblePages.contains(pageCount - 1) }
+    /// The bookmark for where the reader is: the panel in panels mode, else the (first visible) page.
+    var here: Bookmark { Bookmark(page: visiblePages[0], step: mode == .panels && slots.onPanel ? slots.step : -1) }
 
     init(comicURL: URL, settings: ChikaSettings) {
         self.comicURL = comicURL
         // Reading direction: this comic's saved choice, or the global default if never set.
         rightToLeft = ReadingProgress.readingDirection(comicURL, default: settings.defaultRightToLeft)
         mode = ReadingProgress.get(comicURL)?.mode.flatMap(ReadingMode.init(rawValue:)) ?? .panels
+        bookmarks = ReadingProgress.bookmarks(comicURL)
         // Views create the model mid-render; loading writes progress, which the library observes, so
         // run it on the next turn (as iOS's `.task { load() }` did).
         DispatchQueue.main.async { self.load() }
@@ -223,10 +227,18 @@ final class ReaderModel: ObservableObject {
         persist()
     }
 
-    func goToPage(_ index: Int) {
+    /// Goes to a page; in panels mode a bookmark's [step] lands on its panel once the page's regions
+    /// are known (ReaderSlots clamps it, as on resume).
+    func goToPage(_ index: Int, step: Int = -1) {
         guard index >= 0, index < pageCount else { return }
-        slots = ReaderSlots(page: index)
+        slots = ReaderSlots(page: index, step: mode == .panels ? step : -1)
         loadPage()
+    }
+
+    func toggleBookmark() {
+        guard state == .ready else { return }   // before the comic opens, "here" is a placeholder page 0
+        ReadingProgress.toggleBookmark(comicURL, page: here.page, step: here.step)
+        bookmarks = ReadingProgress.bookmarks(comicURL)
     }
 
     /// Jumps to the whole-page view (Android's "show whole page" / ZoomOutMap).

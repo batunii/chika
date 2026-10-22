@@ -67,6 +67,26 @@ final class LibraryStoreTests: XCTestCase {
         XCTAssertEqual(ReadingProgress.all()[ReadingProgress.key(renamed)]?.page, 4)
     }
 
+    func testBookmarksToggleListInOrderAndClearPerComic() throws {
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let a = dir.appendingPathComponent("A.cbz"), b = dir.appendingPathComponent("B.cbz")
+        try FileManager.default.copyItem(at: comic, to: a)
+        try FileManager.default.copyItem(at: comic, to: b)
+
+        ReadingProgress.toggleBookmark(a, page: 4, step: -1)
+        ReadingProgress.toggleBookmark(a, page: 1, step: 2)
+        ReadingProgress.toggleBookmark(a, page: 1, step: -1)
+        ReadingProgress.toggleBookmark(b, page: 0, step: 0)
+        XCTAssertEqual(ReadingProgress.bookmarks(a), [Bookmark(page: 1, step: -1), Bookmark(page: 1, step: 2), Bookmark(page: 4, step: -1)])
+
+        ReadingProgress.toggleBookmark(a, page: 1, step: 2)   // the same spot again removes it
+        XCTAssertEqual(ReadingProgress.bookmarks(a), [Bookmark(page: 1, step: -1), Bookmark(page: 4, step: -1)])
+
+        ReadingProgress.clear(a)
+        XCTAssertEqual(ReadingProgress.bookmarks(a), [])
+        XCTAssertEqual(ReadingProgress.bookmarks(b), [Bookmark(page: 0, step: 0)])
+    }
+
     func testWatchedFolderIsReadInPlaceAndNeverDeleted() throws {
         let folder = dir.appendingPathExtension("watched")
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)

@@ -38,6 +38,7 @@ private struct ReaderContent: View {
     @State private var viewport: CGFloat = 0
 
     private var isReady: Bool { model.state == .ready }
+    private var marked: Bool { model.bookmarks.contains(model.here) }
 
     var body: some View {
         ZStack {
@@ -71,7 +72,7 @@ private struct ReaderContent: View {
                 .keyboardShortcut(.escape, modifiers: [])
             }
         }
-        // Page turns have no visible button; these invisible ones carry ⌘[ / ⌘], the modes and ⌥⌘N.
+        // Page turns have no visible button; these invisible ones carry ⌘[ / ⌘], the modes, ⌥⌘N and ⌘D.
         .background {
             Group {
                 Button("Previous page") { model.turnPage(next: false) }
@@ -84,6 +85,8 @@ private struct ReaderContent: View {
                 }
                 Button("Next night filter") { settings.nightFilter = settings.nightFilter.next }
                     .keyboardShortcut("n", modifiers: [.command, .option])
+                Button("Toggle bookmark") { model.toggleBookmark() }
+                    .keyboardShortcut("d", modifiers: .command)
             }
             .opacity(0)
             .accessibilityHidden(true)
@@ -260,6 +263,27 @@ private struct ReaderContent: View {
             .accessibilityLabel("Show whole page")
             .opacity(model.mode == .panels ? 1 : 0)
             .disabled(model.mode != .panels)
+            Menu {
+                Button(marked ? "Remove bookmark" : "Add bookmark") { model.toggleBookmark() }
+                if !model.bookmarks.isEmpty { Divider() }
+                ForEach(model.bookmarks, id: \.self) { mark in
+                    Button("Page \(mark.page + 1)" + (mark.step >= 0 ? " · panel \(mark.step + 1)" : "")) {
+                        model.goToPage(mark.page, step: mark.step)
+                        // The strip only follows page changes; this also lands on the top of the current page.
+                        if model.mode == .scroll { scroll.scrollTo(id: mark.page, anchor: .top) }
+                    }
+                }
+            } label: {
+                Image(systemName: marked ? "bookmark.fill" : "bookmark")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundColor(Chika.cream)
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .help("Bookmarks: mark this spot (⌘D) or jump back to one")
+            .accessibilityLabel("Bookmarks")
+            .accessibilityValue(marked ? "Bookmarked" : "Not bookmarked")
             Menu {
                 Picker("Reading mode", selection: Binding(get: { model.mode }, set: { model.setMode($0) })) {
                     ForEach(ReadingMode.allCases, id: \.self) { Text($0.title).tag($0) }
