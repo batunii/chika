@@ -4,7 +4,7 @@ import ChikaCore
 
 /// Floating "peek" window: only the current panel of the comic's shared ReaderModel, no chrome, so
 /// you can keep reading in a small always-on-top window while working in another app. A bar fades
-/// in on hover with panel steps, window opacity, minimize, and expand back to the full reader.
+/// in on hover with panel steps, auto-advance, window opacity, minimize, and expand back to the full reader.
 struct PeekView: View {
     let comicURL: URL
     @EnvironmentObject private var readers: ReaderModels
@@ -24,12 +24,18 @@ private struct PeekContent: View {
     @Environment(\.dismissWindow) private var dismissWindow
     @State private var hovering = false
     @State private var opacity = 1.0
+    @State private var playing = false
+    @AppStorage("chika.peek.autoAdvanceSeconds") private var seconds = 5
     @State private var window: NSWindow?
     @FocusState private var focused: Bool
 
     // The current camera's size in bitmap pixels: its ratio is the window's aspect.
     private var aspect: CGSize {
         guard let cg = model.image else { return CGSize(width: 1, height: 1) }
+        if model.mode == .spread, let facing = model.facing {   // both pages at the first page's height
+            return CGSize(width: CGFloat(cg.width) + CGFloat(facing.width) * CGFloat(cg.height) / CGFloat(facing.height),
+                          height: CGFloat(cg.height))
+        }
         let camera = model.slots.camera
         return CGSize(width: CGFloat(camera.width) * CGFloat(cg.width),
                       height: max(CGFloat(camera.height) * CGFloat(cg.height), 1))
@@ -39,7 +45,18 @@ private struct PeekContent: View {
         GeometryReader { geo in
             let camera = model.slots.camera
             ZStack(alignment: .topLeading) {
-                if let cg = model.image {
+                if model.mode == .spread {
+                    // Two pages: the whole spread (mirrored for right-to-left), as the reader shows it.
+                    let pages = [model.image, model.facing].compactMap { $0 }
+                    HStack(spacing: 0) {
+                        ForEach(Array((model.rightToLeft ? pages.reversed() : pages).enumerated()), id: \.offset) { _, page in
+                            Image(decorative: page, scale: 1).resizable().scaledToFit()
+                        }
+                    }
+                    .modifier(NightFilterEffect(filter: settings.nightFilter))
+                    .frame(width: geo.size.width, height: geo.size.height)
+                    .opacity(model.pageAlpha)
+                } else if let cg = model.image {
                     Image(decorative: cg, scale: 1)
                         .resizable()
                         .frame(width: CGFloat(cg.width), height: CGFloat(cg.height))
@@ -71,6 +88,24 @@ private struct PeekContent: View {
         .onKeyPress(.space, phases: .down) { press in
             model.advance(by: press.modifiers.contains(.shift) ? -1 : 1); return .handled
         }
+        .onKeyPress("p", phases: .down) { _ in playing.toggle(); return .handled }
+        // Any move, manual or automatic (or a new dwell time), changes the id and so restarts the wait.
+        .task(id: playing ? [model.slots.page, model.slots.step, seconds] : []) { try? await autoAdvance() }
+    }
+
+    /// While playing: wait the dwell, then step once. Stops at the end of the book.
+    private func autoAdvance() async throws {
+        guard playing else { return }
+        // Clamped: the stored value can be edited outside the app, and 0 would race to the last page.
+        try await Task.sleep(for: .seconds(min(max(seconds, 2), 20)))
+        while model.advance(by: 1) == .blocked {
+            // Blocked while the comic opens, or with this page's panels unknown (detection still running),
+            // retries shortly; blocked otherwise is the end of the book or a comic that failed to open.
+            let waiting = model.state == .loading
+                || (model.state == .ready && model.mode == .panels && model.slots.regions == nil)
+            guard waiting else { playing = false; return }
+            try await Task.sleep(for: .milliseconds(300))
+        }
     }
 
     private var bar: some View {
@@ -79,6 +114,16 @@ private struct PeekContent: View {
                 .help("Previous panel (Left Arrow)")
             Button { model.advance(by: 1) } label: { Label("Next panel", systemImage: "chevron.right") }
                 .help("Next panel (Right Arrow)")
+            Button { playing.toggle() } label: {
+                Label(playing ? "Pause auto-advance" : "Auto-advance", systemImage: playing ? "pause.fill" : "play.fill")
+            }
+                .help(playing ? "Pause auto-advance (P)" : "Auto-advance: next panel every \(seconds) s (P)")
+            // Label hidden: at the 240 pt minimum width it truncates and squeezes the opacity slider.
+            Stepper(value: $seconds, in: 2...20) { Text("\(seconds) s") }
+                .labelsHidden()
+                .help("Seconds per panel when auto-advancing: \(seconds) s")
+                .accessibilityLabel("Seconds per panel")
+                .accessibilityValue("\(seconds) seconds")
             Slider(value: $opacity, in: 0.4...1)
                 .tint(Chika.ochre)
                 .frame(maxWidth: 110)

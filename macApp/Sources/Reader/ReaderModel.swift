@@ -189,23 +189,32 @@ final class ReaderModel: ObservableObject {
 
     /// Steps through slots (intro → panels → outro), crossing into the neighbouring page at either
     /// end. In spread mode a step is a whole spread; in scroll mode a page (the strip follows).
-    func advance(by delta: Int) {
+    /// Returns the move: .blocked is the end of the book, or (panels mode, regions nil) waiting for detection.
+    @discardableResult
+    func advance(by delta: Int) -> ReaderSlots.Move {
         switch mode {
         case .panels:
             let move = withAnimation(Self.cameraTween) { slots.advance(by: delta, pageCount: pageCount) }
             if move == .nextPage || move == .previousPage { loadPage() }
+            return move
         case .spread:
             let spreads = Spreads.pairs(pageCount: pageCount, wide: widePages)
             let i = (spreads.firstIndex { $0.contains(slots.page) } ?? 0) + delta
-            if spreads.indices.contains(i) { goToPage(spreads[i][0]) }
+            guard spreads.indices.contains(i) else { return .blocked }
+            goToPage(spreads[i][0])
+            return delta > 0 ? .nextPage : .previousPage
         case .scroll:
+            guard (0..<pageCount).contains(slots.page + delta) else { return .blocked }
             goToPage(slots.page + delta)
+            return delta > 0 ? .nextPage : .previousPage
         }
     }
 
     /// Turns a whole page (a whole spread in spread mode), landing on its whole-page intro.
     /// [next] is reading-forward.
-    func turnPage(next: Bool) { mode == .spread ? advance(by: next ? 1 : -1) : goToPage(slots.page + (next ? 1 : -1)) }
+    func turnPage(next: Bool) {
+        if mode == .spread { advance(by: next ? 1 : -1) } else { goToPage(slots.page + (next ? 1 : -1)) }
+    }
 
     /// Scroll mode's page image, limited on its short edge so a tall strip keeps its width.
     func scrollImage(_ index: Int) async -> CGImage? {
@@ -239,7 +248,7 @@ final class ReaderModel: ObservableObject {
         }
     }
 
-    /// The camera's crop of `image`: panels mode's reading image, and in every mode what the peek shows.
+    /// The camera's crop of `image`: panels mode's reading image, and outside Two pages what the peek shows.
     func cameraImage() -> CGImage? {
         guard let image else { return nil }
         let r = slots.camera.pixelRect(width: image.width, height: image.height)
@@ -248,7 +257,7 @@ final class ReaderModel: ObservableObject {
 
     /// Copy (⌘C, Edit > Copy): what the reader shows, or with [peek] what the peek window shows.
     func copyItems(peek: Bool = false) -> [NSItemProvider] {
-        (peek ? cameraImage() : readingImage()).map { [NSItemProvider(object: NSImage(cgImage: $0, size: .zero))] } ?? []
+        (peek && mode != .spread ? cameraImage() : readingImage()).map { [NSItemProvider(object: NSImage(cgImage: $0, size: .zero))] } ?? []
     }
 
     /// Pages joined left to right, each scaled to the tallest one's height.

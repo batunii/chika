@@ -66,11 +66,21 @@ deleted from the library.
 
 ⌘C (Edit > Copy) puts what you are reading on the clipboard as an image: the current panel in
 Panels mode (the page when the whole page shows), both pages of the spread side by side in Two
-pages, the page at the top in Scroll. In the peek window ⌘C copies the panel the peek shows.
-⇧⌘E (Export Panel…) saves that image as a PNG wherever you choose, named "<title> p<page>.png".
+pages, the page at the top in Scroll. In the peek window ⌘C copies what the peek shows (the whole
+spread in Two pages). ⇧⌘E (Export Panel…) saves that image as a PNG wherever you choose, named
+"<title> p<page>.png".
 Both are also in the "…" menu at the end of the top bar, and do nothing while a new page is still
 loading. The image is the decoded page without the night filter: full size up to about 5000 px
 (larger scans are halved until they fit), and in Two pages both pages joined at the taller page's height.
+
+## Peek auto-advance
+
+The peek window (⇧⌘P) can read by itself: the play button in its hover bar, or P while it is
+focused, steps one panel (a spread in Two pages, where the peek shows both pages, a page in Scroll)
+every few seconds. The stepper next to it sets the wait, 2 to 20 seconds (5 by default, remembered
+app-wide; its tooltip shows the current value). Any step, by hand or by the timer, starts the wait
+again; a page whose panels are still being detected is held until they land; playing stops by itself
+at the end of the comic, or if the comic could not be opened.
 
 ## Where the library lives
 
