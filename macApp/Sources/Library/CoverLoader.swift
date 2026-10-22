@@ -16,7 +16,7 @@ enum CoverLoader {
         if let cachedCover, let cachedCount { return (cachedCover, cachedCount) }
 
         let result: (NSImage?, Int) = await Task.detached(priority: .userInitiated) {
-            guard let archive = try? CbzArchive(url: url) else { return (nil, 0) }
+            guard let archive = try? ComicOpener.open(url) else { return (nil, 0) }
             let n = archive.pageCount
             guard n > 0, let data = try? archive.readPage(0) else { return (nil, n) }
             let img = thumbnail(from: data, maxPixel: 600) ?? NSImage(data: data)

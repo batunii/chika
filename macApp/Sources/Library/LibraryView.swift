@@ -7,8 +7,12 @@ struct LibraryView: View {
     @EnvironmentObject private var settings: ChikaSettings
     @Environment(\.openWindow) private var openWindow
     @Environment(\.openSettings) private var openSettings
-    @StateObject private var library = LibraryStore()
+    @EnvironmentObject private var library: LibraryStore
     @State private var showPicker = false
+    // What the picker does: import copies, or add files/folders in place. Kept apart from
+    // showPicker because the importer clears that before its completion runs.
+    @State private var pickMode = PickMode.importCopies
+    private enum PickMode { case importCopies, inPlace }
     // Comic awaiting delete confirmation (Android shows a "Remove comic?" dialog before deleting).
     @State private var pendingDelete: URL?
     // Resume snapshot keyed by ReadingProgress.key, so cards show fresh progress without resetting scroll.
@@ -35,18 +39,23 @@ struct LibraryView: View {
         .onDrop(of: [.fileURL], isTargeted: nil) { providers in
             for provider in providers {
                 _ = provider.loadObject(ofClass: URL.self) { url, _ in
-                    if let url { Task { @MainActor in library.importComic(from: url) } }
+                    guard let url else { return }
+                    // A dropped folder is watched in place; dropped files are imported as copies.
+                    let isFolder = (try? url.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory ?? false
+                    Task { @MainActor in if isFolder { library.addInPlace(url) } else { library.importComic(from: url) } }
                 }
             }
             return true
         }
+        // One importer for both modes: SwiftUI only honours one .fileImporter per view.
         .fileImporter(
             isPresented: $showPicker,
-            allowedContentTypes: LibraryStore.importableTypes,
+            allowedContentTypes: LibraryStore.importableTypes + (pickMode == .inPlace ? [.folder] : []),
             allowsMultipleSelection: true
         ) { result in
             switch result {
-            case .success(let urls): for url in urls { library.importComic(from: url) }
+            case .success(let urls):
+                for url in urls { if pickMode == .inPlace { library.addInPlace(url) } else { library.importComic(from: url) } }
             case .failure(let error): library.importError = error.localizedDescription
             }
         }
@@ -63,12 +72,12 @@ struct LibraryView: View {
             set: { if !$0 { pendingDelete = nil } }
         )) {
             Button("Cancel", role: .cancel) { pendingDelete = nil }
-            Button("Delete", role: .destructive) {
+            Button("Remove", role: .destructive) {
                 if let url = pendingDelete { library.delete(url) }
                 pendingDelete = nil
             }
         } message: {
-            Text("This removes the imported copy. The original file is untouched.")
+            Text(pendingDelete.map(removalMessage) ?? "")
         }
         .onAppear { progress = ReadingProgress.all() }
         // Reader windows save progress and recency on every step; keep cards and order live.
@@ -77,6 +86,18 @@ struct LibraryView: View {
             progress = ReadingProgress.all()
         }
         .onOpenURL { url in library.importComic(from: url) }
+    }
+
+    private func removalLabel(_ url: URL) -> String {
+        guard let source = library.sources[url] else { return "Remove" }
+        return source == url ? "Remove from Library" : "Stop Watching “\(source.lastPathComponent)”"
+    }
+
+    private func removalMessage(_ url: URL) -> String {
+        guard let source = library.sources[url] else { return "This deletes the imported copy. The original file is untouched." }
+        return source == url
+            ? "The comic leaves the library. The file itself is untouched."
+            : "Every comic in “\(source.lastPathComponent)” leaves the library. The files themselves are untouched."
     }
 
     private var header: some View {
@@ -104,6 +125,15 @@ struct LibraryView: View {
             }
             .accessibilityLabel("Settings")
             .help("Settings")
+            Button { pickMode = .inPlace; showPicker = true } label: {
+                Image(systemName: "folder.badge.plus")
+                    .font(.system(size: 18, weight: .medium))
+                    .foregroundColor(Chika.cream)
+                    .frame(width: 36, height: 36)
+            }
+            .keyboardShortcut("o", modifiers: [.command, .shift])
+            .accessibilityLabel("Add comics or folders in place")
+            .help("Read comics or watch folders where they are, without copying (⇧⌘O)")
             importButton
                 .keyboardShortcut("o", modifiers: .command)
         }
@@ -114,7 +144,7 @@ struct LibraryView: View {
     }
 
     private var importButton: some View {
-        Button { showPicker = true } label: {
+        Button { pickMode = .importCopies; showPicker = true } label: {
             HStack(spacing: 8) {
                 if library.importing {
                     ProgressView().controlSize(.small).tint(Chika.cream)
@@ -142,7 +172,7 @@ struct LibraryView: View {
             Text("Import a CBZ, CBR, ZIP, or RAR comic to begin reading.")
                 .font(.archivo(15)).foregroundColor(Chika.creamMuted)
             importButton.padding(.top, 4)
-            Text("⌘O to import comics, or drop them here")
+            Text("⌘O to import copies, ⇧⌘O to read files or folders in place, or drop them here")
                 .font(.archivo(12)).foregroundColor(Chika.creamMuted)
         }
         .multilineTextAlignment(.center)
@@ -167,11 +197,11 @@ struct LibraryView: View {
                         .buttonStyle(.plain)
                         .contextMenu {
                             Button(role: .destructive) { pendingDelete = url } label: {
-                                Label("Remove", systemImage: "trash")
+                                Label(removalLabel(url), systemImage: "trash")
                             }
                         }
                     }
-                    AddTile(importing: library.importing) { showPicker = true }
+                    AddTile(importing: library.importing) { pickMode = .importCopies; showPicker = true }
                 }
             }
             .padding(28)

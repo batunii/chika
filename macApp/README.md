@@ -33,6 +33,19 @@ To try a comic: copy `iosApp/ci/SyntheticManga.cbz` somewhere (the repo ignores 
 Comics are stored in `~/Library/Containers/com.chakra.comicreader/Data/Documents/Comics` (the app is
 sandboxed; this is the same folder and bundle id the Catalyst app used, so its library and progress carry over).
 
+## Where the library lives
+
+- **Imported copies** (⌘O, or files dropped on the window) go to the Comics folder above; CBR is
+  converted to CBZ on import.
+- **Read in place** (⇧⌘O, or a folder dropped on the window): single comics or whole folders stay
+  where they are. Chika keeps a security-scoped bookmark for each (entitlement
+  `com.apple.security.files.bookmarks.app-scope`) and watches folders with FSEvents, so new CBZ/CBR
+  files appear by themselves. Removing one only forgets the bookmark; the files are never touched.
+  A CBR read in place is converted once into `Library/Caches/Chika/Converted` inside the container.
+- **Progress** is a SQLite table at `Library/Application Support/Chika/progress.sqlite` inside the
+  container, keyed by file identity (volume UUID + inode), so renaming a comic keeps its place. The
+  first launch copies the old UserDefaults progress over and leaves it for the Catalyst app.
+
 ## Signing
 
 Local builds sign ad hoc (`CODE_SIGN_IDENTITY: "-"`), so no team is needed. To sign with your

@@ -45,8 +45,17 @@ final class ReaderModel: ObservableObject {
     }
 
     private func load() {
+        // Off the main thread: a CBR read in place converts on its first open.
+        let url = comicURL
+        Self.ioQueue.async {
+            let opened = Result { try ComicOpener.open(url) }
+            DispatchQueue.main.async { self.loaded(opened) }
+        }
+    }
+
+    private func loaded(_ opened: Result<CbzArchive, Error>) {
         do {
-            let loader = PageLoader(archive: try CbzArchive(url: comicURL))
+            let loader = PageLoader(archive: try opened.get())
             guard loader.pageCount > 0 else { state = .failed("No image pages found in this archive"); return }
             self.loader = loader
             pageCount = loader.pageCount
