@@ -45,6 +45,9 @@ final class ReaderModel: ObservableObject {
     // Detected panels cached per page (in the current reading direction) so back/forward and
     // prefetched pages don't re-run the detector. Cleared when the direction changes.
     private var panelCache: [Int: [Panel]] = [:]
+    // Panels drawn by hand in the panel editor, per page, read from the database as each page loads.
+    // They win over detection and keep their stored order in either reading direction.
+    @Published private var overrides: [Int: [Panel]] = [:]
     // Pages found to be wider than tall (scanned double pages): they stand alone in a spread.
     private var widePages: Set<Int> = []
 
@@ -55,6 +58,10 @@ final class ReaderModel: ObservableObject {
     var onLastPage: Bool { visiblePages.contains(pageCount - 1) }
     /// The bookmark for where the reader is: the panel in panels mode, else the (first visible) page.
     var here: Bookmark { Bookmark(page: visiblePages[0], step: mode == .panels && slots.onPanel ? slots.step : -1) }
+    /// The current page's panels were drawn by hand in the panel editor.
+    var pageEdited: Bool { mode == .panels && overrides[slots.page] != nil }
+    /// The panel editor (⌘E) needs Panels mode with this page and its panels on screen.
+    var canEditPanels: Bool { mode == .panels && image != nil && imagePages == visiblePages && slots.regions != nil && !detecting }
 
     init(comicURL: URL, settings: ChikaSettings) {
         self.comicURL = comicURL
@@ -103,7 +110,10 @@ final class ReaderModel: ObservableObject {
         guard let loader else { return }
         // Known panels apply at once (resolving a backward turn's outro); unknown ones stay nil and
         // block stepping until detection lands.
-        if mode == .panels, let cached = panelCache[slots.page] { slots.setRegions(cached) }
+        if mode == .panels {
+            overrides[slots.page] = ReadingProgress.panelOverride(comicURL, page: slots.page)
+            if let known = overrides[slots.page] ?? panelCache[slots.page] { slots.setRegions(known) }
+        }
         detecting = false
         pageAlpha = 0.35   // fades up to 1 once the page renders
 
@@ -151,8 +161,9 @@ final class ReaderModel: ObservableObject {
     private func prefetch(_ index: Int) {
         guard let loader, index < pageCount, panelCache[index] == nil else { return }
         let rtl = rightToLeft
+        let edited = ReadingProgress.panelOverride(comicURL, page: index) != nil
         Self.detectQueue.async {
-            guard let img = loader.loadPage(index) else { return }
+            guard let img = loader.loadPage(index), !edited else { return }   // an edited page only needs the decode
             let found = Self.detector.zoomRegions(for: img, rightToLeft: rtl)
             DispatchQueue.main.async { self.landed(found, page: index, rtl: rtl) }
         }
@@ -174,7 +185,8 @@ final class ReaderModel: ObservableObject {
 
     /// A detection finished: cache it, and if we're still on that page, glide into its panels.
     private func landed(_ found: [Panel], page: Int, rtl: Bool) {
-        guard rtl == rightToLeft, mode == .panels else { return } // stale cache, or no camera to move
+        // Stale cache, no camera to move, or a page whose panels were drawn by hand.
+        guard rtl == rightToLeft, mode == .panels, overrides[page] == nil else { return }
         panelCache[page] = found
         guard page == slots.page else { return }
         withAnimation(Self.cameraTween) { slots.setRegions(found) }
@@ -306,7 +318,27 @@ final class ReaderModel: ObservableObject {
         rightToLeft.toggle()
         panelCache.removeAll() // panels are ordered per-direction; re-detect under the new one
         persist()
-        if mode == .panels { redetect() }
+        if mode == .panels && overrides[slots.page] == nil { redetect() }
+    }
+
+    /// Saves the panel editor's [panels] (reading order) as [page]'s panels in place of detection.
+    /// False if the database write failed: nothing changes, so the editor can keep the edits.
+    func savePanels(_ panels: [Panel], page: Int) -> Bool {
+        let panels = panels.isEmpty ? [.fullPage] : panels   // as detection does when it finds nothing
+        guard ReadingProgress.setPanelOverride(comicURL, page: page, panels: panels) else { return false }
+        overrides[page] = panels
+        if page == slots.page {
+            detecting = false   // a detection still running for this page is dropped when it lands
+            withAnimation(Self.cameraTween) { slots.setRegions(panels) }
+        }
+        return true
+    }
+
+    /// Drops [page]'s hand-drawn panels and detects them again.
+    func resetPanels(page: Int) {
+        guard overrides.removeValue(forKey: page) != nil else { return }   // not edited: detection already shows
+        ReadingProgress.deletePanelOverride(comicURL, page: page)
+        if page == slots.page { redetect() }
     }
 }
 

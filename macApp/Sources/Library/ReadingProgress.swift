@@ -1,5 +1,6 @@
 import Foundation
 import SQLite3
+import ChikaCore
 
 /// Per-comic reading progress (resume point + total): the counterpart to Android's Room-backed
 /// resume (page *and* panel).
@@ -16,7 +17,7 @@ struct Progress: Codable, Equatable {
 /// A spot the reader marked in a comic: a page and its panel (-1 = the whole page).
 struct Bookmark: Hashable {
     var page: Int
-    // shortcut: step is a panel index in the reading direction at the time; a direction flip moves it to another panel. Store the panel's rect if that bites.
+    // shortcut: step is a panel index in the reading direction (and panel edits) at the time; a direction flip or a panel edit moves it to another panel. Store the panel's rect if that bites.
     var step: Int
 }
 
@@ -72,6 +73,7 @@ enum ReadingProgress {
     static func clear(_ url: URL) {
         run("DELETE FROM progress WHERE id = ?", [key(url)])
         run("DELETE FROM bookmarks WHERE id = ?", [key(url)])
+        run("DELETE FROM panel_overrides WHERE id = ?", [key(url)])
         changed()
     }
 
@@ -116,6 +118,29 @@ enum ReadingProgress {
         }
     }
 
+    // MARK: - Panel overrides (the panel editor)
+
+    /// The panels drawn by hand for a page, in reading order; nil = none, detection decides.
+    static func panelOverride(_ url: URL, page: Int) -> [Panel]? {
+        var json: String?
+        run("SELECT panels FROM panel_overrides WHERE id = ? AND page = ?", [key(url), page]) { row in
+            json = sqlite3_column_text(row, 0).map { String(cString: $0) }
+        }
+        return json.flatMap { try? JSONDecoder().decode([Panel].self, from: Data($0.utf8)) }
+    }
+
+    /// Stores `panels` as the page's override. False if it was not written, so the editor keeps the edits.
+    @discardableResult
+    static func setPanelOverride(_ url: URL, page: Int, panels: [Panel]) -> Bool {
+        guard let json = try? JSONEncoder().encode(panels) else { return false }
+        return run("INSERT OR REPLACE INTO panel_overrides(id, page, panels) VALUES(?, ?, ?)",
+                   [key(url), page, String(decoding: json, as: UTF8.self)])
+    }
+
+    static func deletePanelOverride(_ url: URL, page: Int) {
+        run("DELETE FROM panel_overrides WHERE id = ? AND page = ?", [key(url), page])
+    }
+
     // MARK: - Migration
 
     /// One-time copy of the old filename-keyed UserDefaults JSON into the table, for the files in
@@ -153,6 +178,7 @@ enum ReadingProgress {
             PRAGMA journal_mode = WAL;
             CREATE TABLE IF NOT EXISTS progress(id TEXT PRIMARY KEY, page INTEGER, step INTEGER, total INTEGER, rtl INTEGER, opened REAL);
             CREATE TABLE IF NOT EXISTS bookmarks(id TEXT, page INTEGER, step INTEGER, created REAL, PRIMARY KEY(id, page, step));
+            CREATE TABLE IF NOT EXISTS panel_overrides(id TEXT, page INTEGER, panels TEXT NOT NULL, PRIMARY KEY(id, page));
             """, nil, nil, nil)
         // Added in phase 3; fails harmlessly once the column exists.
         sqlite3_exec(handle, "ALTER TABLE progress ADD COLUMN mode TEXT", nil, nil, nil)
@@ -160,10 +186,11 @@ enum ReadingProgress {
         return handle
     }
 
-    /// Runs one statement with `args` bound in order, calling `row` for each result row.
-    private static func run(_ sql: String, _ args: [Any?] = [], row: ((OpaquePointer) -> Void)? = nil) {
+    /// Runs one statement with `args` bound in order, calling `row` for each result row. True if it ran to the end.
+    @discardableResult
+    private static func run(_ sql: String, _ args: [Any?] = [], row: ((OpaquePointer) -> Void)? = nil) -> Bool {
         var stmt: OpaquePointer?
-        guard let db, sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK, let stmt else { return }
+        guard let db, sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK, let stmt else { return false }
         defer { sqlite3_finalize(stmt) }
         for (i, arg) in args.enumerated() {
             let n = Int32(i + 1)
@@ -175,7 +202,11 @@ enum ReadingProgress {
             default: sqlite3_bind_null(stmt, n)
             }
         }
-        while sqlite3_step(stmt) == SQLITE_ROW { row?(stmt) }
+        while true {
+            let result = sqlite3_step(stmt)
+            guard result == SQLITE_ROW else { return result == SQLITE_DONE }
+            row?(stmt)
+        }
     }
 
     private static func progress(_ row: OpaquePointer, from col: Int32) -> Progress? {

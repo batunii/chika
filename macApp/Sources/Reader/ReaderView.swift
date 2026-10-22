@@ -38,6 +38,8 @@ private struct ReaderContent: View {
     @State private var scroll = ScrollPosition(idType: Int.self)
     @State private var scrollY: CGFloat = 0
     @State private var viewport: CGFloat = 0
+    // The panel editor replaces the page and both bars (so their Esc and Return shortcuts are gone).
+    @State private var editing = false
 
     private var isReady: Bool { model.state == .ready }
     private var marked: Bool { model.bookmarks.contains(model.here) }
@@ -56,13 +58,17 @@ private struct ReaderContent: View {
                 }
                 .padding()
             case .ready:
-                GeometryReader { screen in
-                    readerBody(size: screen.size)
+                if editing {
+                    PanelEditor(model: model) { editing = false }
+                } else {
+                    GeometryReader { screen in
+                        readerBody(size: screen.size)
+                    }
                 }
             }
         }
-        .overlay(alignment: .top) { if isReady { topBar } }
-        .overlay(alignment: .bottom) { if isReady && model.pageCount > 1 { bottomBar } }
+        .overlay(alignment: .top) { if isReady && !editing { topBar } }
+        .overlay(alignment: .bottom) { if isReady && !editing && model.pageCount > 1 { bottomBar } }
         .overlay(alignment: .topLeading) {
             if !isReady {
                 Button { dismiss() } label: {
@@ -74,8 +80,9 @@ private struct ReaderContent: View {
                 .keyboardShortcut(.escape, modifiers: [])
             }
         }
-        // Page turns have no visible button; these invisible ones carry ⌘[ / ⌘], the modes, ⌥⌘N, ⌘D
-        // and ⇧⌘E (the More menu shows ⇧⌘E but a menu's shortcuts may not fire until it has been opened).
+        // Page turns have no visible button; these invisible ones carry ⌘[ / ⌘], the modes, ⌥⌘N, ⌘D,
+        // ⇧⌘E and ⌘E (the More menu shows the last two but a menu's shortcuts may not fire until it has
+        // been opened). Off while editing panels, so the page under the editor stays put.
         .background {
             Group {
                 Button("Previous page") { model.turnPage(next: false) }
@@ -92,7 +99,10 @@ private struct ReaderContent: View {
                     .keyboardShortcut("d", modifiers: .command)
                 Button("Export panel") { exportPanel() }
                     .keyboardShortcut("e", modifiers: [.command, .shift])
+                Button("Edit panels") { editPanels() }
+                    .keyboardShortcut("e", modifiers: .command)
             }
+            .disabled(editing)
             .opacity(0)
             .accessibilityHidden(true)
         }
@@ -117,11 +127,15 @@ private struct ReaderContent: View {
 
     /// One reading step: a panel, a spread, or (scroll mode) most of a screen.
     private func step(_ delta: Int) {
+        guard !editing else { return }
         guard model.mode == .scroll else { model.advance(by: delta); return }
         withAnimation(.easeOut(duration: 0.25)) { scroll.scrollTo(y: max(0, scrollY + CGFloat(delta) * viewport * 0.85)) }
     }
 
-    private func turn(next: Bool) { model.mode == .scroll ? step(next ? 1 : -1) : model.turnPage(next: next) }
+    private func turn(next: Bool) {
+        guard !editing else { return }
+        model.mode == .scroll ? step(next ? 1 : -1) : model.turnPage(next: next)
+    }
 
     @ViewBuilder
     private func readerBody(size: CGSize) -> some View {
@@ -224,9 +238,10 @@ private struct ReaderContent: View {
             return "Page\(model.visiblePages.count > 1 ? "s" : "") \(pages)/\(model.pageCount) · two pages"
         }
         let prefix = "Page \(model.slots.page + 1)/\(model.pageCount) · "
+        let edited = model.pageEdited ? " · edited" : ""
         if model.detecting { return prefix + "detecting…" }
-        if model.slots.onPanel { return prefix + "panel \(model.slots.step + 1)/\(model.slots.panelCount)" }
-        return prefix + "full page"
+        if model.slots.onPanel { return prefix + "panel \(model.slots.step + 1)/\(model.slots.panelCount)" + edited }
+        return prefix + "full page" + edited
     }
 
     private var topBar: some View {
@@ -337,6 +352,10 @@ private struct ReaderContent: View {
                     .keyboardShortcut("c", modifiers: .command)
                 Button("Export Panel…") { exportPanel() }
                     .keyboardShortcut("e", modifiers: [.command, .shift])
+                Divider()
+                Button("Edit Panels") { editPanels() }
+                    .keyboardShortcut("e", modifiers: .command)
+                    .disabled(!model.canEditPanels)
             } label: {
                 Image(systemName: "ellipsis.circle")
                     .font(.system(size: 16, weight: .semibold))
@@ -345,7 +364,7 @@ private struct ReaderContent: View {
             .menuStyle(.borderlessButton)
             .menuIndicator(.hidden)
             .fixedSize()
-            .help("More: copy the panel (⌘C) or export it as a PNG (⇧⌘E)")
+            .help("More: copy the panel (⌘C), export it as a PNG (⇧⌘E) or edit this page's panels (⌘E)")
             .accessibilityLabel("More")
         }
         .buttonStyle(.plain)
@@ -420,6 +439,12 @@ private struct ReaderContent: View {
         } catch {
             NSAlert(error: error).runModal()
         }
+    }
+
+    /// Opens the panel editor (⌘E) on the current page; Panels mode only, once the page and its panels are in.
+    private func editPanels() {
+        guard model.canEditPanels else { NSSound.beep(); return }
+        editing = true
     }
 
     /// Whole page, also dropping any manual zoom (even when already on the whole page).

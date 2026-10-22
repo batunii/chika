@@ -73,6 +73,32 @@ Both are also in the "…" menu at the end of the top bar, and do nothing while 
 loading. The image is the decoded page without the night filter: full size up to about 5000 px
 (larger scans are halved until they fit), and in Two pages both pages joined at the taller page's height.
 
+## Panel editor
+
+When detection gets a page wrong, ⌘E (or Edit Panels in the "…" menu) in Panels mode opens the
+panel editor on the current page, once the page and its panels have loaded. It shows the whole page
+with each panel as a numbered box (the number is its place in the reading order):
+
+- Drag on the page to draw a new panel; it is read last. Dragging across a box that is not selected
+  also draws.
+- Click a box to select it, Shift-click to add or remove one; click the page to select none.
+- Drag a selected box to move it, or one of its corners to resize it. Panels stay on the page and
+  never get smaller than 2% of it on a side.
+- Delete removes the selected panels.
+- The toolbar: Earlier and Later move the selected panel in the reading order; Merge joins two or
+  more into the box around them (read where the first of them was); Split across cuts one into top
+  and bottom halves, Split down into side-by-side halves (the right half first when reading right
+  to left); Auto order puts every panel in reading order for the comic's direction; Reset to
+  detected forgets the page's saved panels and detects them again.
+- Return saves, Esc (or Cancel) closes without saving. While editing, the arrow keys, clicks and
+  zoom do not move the reader.
+
+A saved page reads its edited panels instead of detected ones (the status line says "· edited"),
+keeps their order when the reading direction is flipped, and saving with no panels left reads the
+page whole. Edits are kept per page in the progress database and go when the comic is deleted from
+the library. A bookmark or resume point on that page keeps its panel number, so after an edit it can
+land on a different panel.
+
 ## Peek auto-advance
 
 The peek window (⇧⌘P) can read by itself: the play button in its hover bar, or P while it is
