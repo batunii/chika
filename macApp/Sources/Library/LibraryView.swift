@@ -11,7 +11,7 @@ struct LibraryView: View {
     @State private var showPicker = false
     // Comic awaiting delete confirmation (Android shows a "Remove comic?" dialog before deleting).
     @State private var pendingDelete: URL?
-    // Resume snapshot keyed by filename, so cards show fresh progress without resetting scroll.
+    // Resume snapshot keyed by ReadingProgress.key, so cards show fresh progress without resetting scroll.
     @State private var progress: [String: Progress] = [:]
 
     private let columns = [GridItem(.adaptive(minimum: 170, maximum: 220), spacing: 24)]
@@ -72,7 +72,7 @@ struct LibraryView: View {
         }
         .onAppear { progress = ReadingProgress.all() }
         // Reader windows save progress and recency on every step; keep cards and order live.
-        .onReceive(NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)) { _ in
+        .onReceive(NotificationCenter.default.publisher(for: ReadingProgress.didChange)) { _ in
             library.refresh()
             progress = ReadingProgress.all()
         }
@@ -162,7 +162,7 @@ struct LibraryView: View {
                 LazyVGrid(columns: columns, alignment: .leading, spacing: 28) {
                     ForEach(library.comics, id: \.self) { url in
                         Button { openWindow(id: "reader", value: url) } label: {
-                            ComicCard(url: url, progress: progress[url.lastPathComponent])
+                            ComicCard(url: url, progress: progress[ReadingProgress.key(url)])
                         }
                         .buttonStyle(.plain)
                         .contextMenu {

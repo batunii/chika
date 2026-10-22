@@ -34,6 +34,7 @@ final class LibraryStore: ObservableObject {
         dir = directory ?? FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("Comics", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        ReadingProgress.migrateLegacy(in: dir)
         refresh()
     }
 
@@ -42,12 +43,13 @@ final class LibraryStore: ObservableObject {
         let opened = ReadingProgress.openedMap()
         comics = files
             .filter { ["cbz", "zip"].contains($0.pathExtension.lowercased()) }
+            .map { ($0, opened[ReadingProgress.key($0)] ?? 0) }
             // Most-recently-opened first (Android's `ORDER BY lastOpened DESC`), then natural filename.
             .sorted {
-                let ta = opened[$0.lastPathComponent] ?? 0, tb = opened[$1.lastPathComponent] ?? 0
-                if ta != tb { return ta > tb }
-                return $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending
+                if $0.1 != $1.1 { return $0.1 > $1.1 }
+                return $0.0.lastPathComponent.localizedStandardCompare($1.0.lastPathComponent) == .orderedAscending
             }
+            .map(\.0)
     }
 
     /// Imports off the main thread. The returned task lets tests await completion; the UI ignores it.
@@ -70,9 +72,9 @@ final class LibraryStore: ObservableObject {
     }
 
     func delete(_ url: URL) {
+        ReadingProgress.clear(url)   // first: its key is read from the file
         try? FileManager.default.removeItem(at: url)
         CoverLoader.evict(url)
-        ReadingProgress.clear(url)
         refresh()
     }
 
