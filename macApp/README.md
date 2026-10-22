@@ -50,17 +50,20 @@ the app's own controls. ⌥⌘N cycles it in the reader. The choice is app-wide,
 
 - **Invert**: dark pages with the colours' hues kept.
 - **Sepia**: warm monochrome.
-- **Dim**: in Panels mode, darkens the page around the current panel (on the whole page nothing
-  is darkened); in Two pages, Scroll and the peek window it lowers the whole page's brightness.
+- **Dim**: in Panels mode, darkens the page around the current panel, and the whole page while the
+  whole page shows; in Two pages, Scroll and the peek window it lowers the whole page's brightness.
 
 ## Bookmarks
 
-⌘D bookmarks where you are, or removes the bookmark if there is one: the panel in Panels mode
-(the page when the whole page shows), the spread's first page in Two pages, the top page in Scroll.
+⌘D bookmarks where you are, or removes the bookmarks there if there are any: the panel in Panels
+mode (the page when the whole page shows), the spread's first page in Two pages, the top page in
+Scroll. In Two pages and Scroll any bookmark on a page on screen counts as here, a panel's too.
 The bookmark menu in the top bar is filled when the current spot is bookmarked; it lists the comic's
 bookmarks in page order ("Page 4 · panel 2") and picking one jumps there (in Two pages and Scroll,
-to its page). Bookmarks live next to the progress in the same database and go when the comic is
-deleted from the library.
+to its page). A bookmark keeps its panel number, so after a direction flip or a panel edit it can
+land on a different panel. Bookmarks live next to the progress in the same database and go when an
+imported comic is deleted; a comic read in place keeps them, like its progress, so they come back if
+it is added again.
 
 ## Copy and export
 
@@ -81,7 +84,9 @@ panel editor on the current page, once the page and its panels have loaded. It s
 with each panel as a numbered box (the number is its place in the reading order):
 
 - Drag on the page to draw a new panel; it is read last. Dragging across a box that is not selected
-  also draws.
+  also draws, unless the drag starts on the box's number.
+- Drag a box's number onto another box to give it that box's place in the reading order (the boxes
+  in between shift by one).
 - Click a box to select it, Shift-click to add or remove one; click the page to select none.
 - Drag a selected box to move it, or one of its corners to resize it. Panels stay on the page and
   never get smaller than 2% of it on a side.
@@ -91,20 +96,28 @@ with each panel as a numbered box (the number is its place in the reading order)
   and bottom halves, Split down into side-by-side halves (the right half first when reading right
   to left); Auto order puts every panel in reading order for the comic's direction; Reset to
   detected forgets the page's saved panels and detects them again.
-- Return saves, Esc (or Cancel) closes without saving. While editing, the arrow keys, clicks and
-  zoom do not move the reader.
+- Return saves, Esc (or Cancel) closes without saving. While editing, the arrow keys, clicks, zoom
+  and ⌘C do nothing in the reader, and peek auto-advance pauses (the peek's own arrows still step).
 
 A saved page reads its edited panels instead of detected ones (the status line says "· edited"),
 keeps their order when the reading direction is flipped, and saving with no panels left reads the
-page whole. Edits are kept per page in the progress database and go when the comic is deleted from
-the library. A bookmark or resume point on that page keeps its panel number, so after an edit it can
+page whole. Edits are kept per page in the progress database and go when an imported comic is
+deleted; a comic read in place keeps them, like its progress (until then the training export counts
+them as skipped). A bookmark or resume point on that page keeps its panel number, so after an edit it can
 land on a different panel.
 
 ## Training export
 
-File > Export Panel Corrections… turns every page fixed in the panel editor into training data for
-the panel detector, so the model can learn from the reader's corrections. Pick (or create) a folder;
-Chika writes each corrected page of a comic that is still in the library as
+File > Export Panel Corrections… turns pages fixed in the panel editor into training data for the
+panel detector, so the model can learn from the reader's corrections. Only a page whose every box was
+drawn by hand in the editor (drawn boxes may then be moved and resized) is exported: the editor
+starts from the reader's zoom regions, not from panels. Those are padded (5.7% of a panel's size on
+each side), may cover two merged neighbours or be pieces of one panel (the planner splits a
+full-width panel into 2, a broad panel or a whole page into 4, the gap filler adds boxes for
+uncovered strips), and Merge and Split make boxes that are rarely one panel either; trained on, they
+would teach the detector to pad, merge and split. To export a page, delete its boxes and draw each
+panel tightly. Pick (or create) a folder; Chika writes each such page of a comic that is still in the
+library as
 `images/train/chika_<title>_p<page>.jpg` (the archive's own bytes when the page is a JPEG, else
 re-encoded) and its boxes as `labels/train/chika_<title>_p<page>.txt`, one `0 cx cy w h` line per
 panel (class 0 = panel, normalized, 6 decimals), the layout `training/scripts` writes. The page
@@ -112,16 +125,8 @@ number is 1-based and three digits, and the title has anything but letters, digi
 by `_`. Comics whose titles would give the same name (ignoring case) also get 8 hex digits from the
 comic's identity, `chika_<title>_<id>_p<page>`. A page saved with no boxes goes out as one page-sized
 panel, the way the reader shows it. The closing alert counts edits skipped because their comic is no
-longer in the library, and pages that could not be read (the comic will not open, or has shrunk).
-
-Known limit: every saved box is labelled a panel, but the editor starts from the reader's zoom
-regions, not from panels. A box you leave unchanged is padded (5.7% of a panel's size on each side)
-and may cover two merged neighbours; after retraining on such boxes the reader pads the detector's
-already loose boxes again and merges panels more often. Some boxes are only pieces of one panel: the
-planner splits a full-width panel into 2, a broad panel or a whole page into 4 and a spread into up to
-8, the gap filler adds boxes for uncovered strips, and Split across/down halves a box. Each piece is
-exported as a panel of its own and teaches the detector to split real panels. Before exporting, redraw
-every box on a corrected page to a tight panel and join split pieces back into one.
+longer in the library or a box was not drawn by hand, and pages that could not be read (the comic
+will not open, or has shrunk). Edits saved before this rule existed count as not drawn.
 
 Like the COMICS pages, these carry panel labels only, no text (class 1) boxes. To fold them into
 the training set, copy both folders into the dataset from the repo's `training` folder (the `chika_`
@@ -143,9 +148,11 @@ The peek window (⇧⌘P) can read by itself: the play button in its hover bar, 
 focused, steps one panel (a spread in Two pages, where the peek shows both pages, a page in Scroll)
 every few seconds. The stepper next to it sets the wait, 2 to 20 seconds (5 by default, remembered
 app-wide; its tooltip shows the current value). Any step, by hand or by the timer, starts the wait
-again; a page whose panels are still being detected is held until they land; playing stops by itself
-at the end of the comic, if the comic could not be opened, or when the peek is minimized or Chika
-is hidden (⌘H), so it never reads on where you cannot see it.
+again, and the wait only starts once the page is on screen with its panels detected. It pauses while
+the pointer is over the peek or the reader's panel editor is open, and starts the wait again after.
+Playing stops by itself at the end of the comic, if the comic could not be opened, or when the peek
+goes out of sight (minimized, Chika hidden with ⌘H, the screen locked or asleep, the screen saver
+on), so it never reads on where you cannot see it.
 
 ## Where the library lives
 

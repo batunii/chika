@@ -114,7 +114,7 @@ enum ReadingProgress {
         let args: [Any?] = [key(url), page, step]
         run("DELETE FROM bookmarks WHERE id = ? AND page = ? AND step = ?", args)
         if sqlite3_changes(db) == 0 {
-            run("INSERT INTO bookmarks(id, page, step, created) VALUES(?, ?, ?, ?)", args + [Date().timeIntervalSince1970])
+            run("INSERT INTO bookmarks(id, page, step) VALUES(?, ?, ?)", args)
         }
     }
 
@@ -129,25 +129,35 @@ enum ReadingProgress {
         return json.flatMap { try? JSONDecoder().decode([Panel].self, from: Data($0.utf8)) }
     }
 
-    /// Stores `panels` as the page's override. False if it was not written, so the editor keeps the edits.
+    /// Stores `panels` as the page's override; `drawn` = every box was drawn by hand (training export).
+    /// False if it was not written, so the editor keeps the edits.
     @discardableResult
-    static func setPanelOverride(_ url: URL, page: Int, panels: [Panel]) -> Bool {
+    static func setPanelOverride(_ url: URL, page: Int, panels: [Panel], drawn: Bool = false) -> Bool {
         guard let json = try? JSONEncoder().encode(panels) else { return false }
-        return run("INSERT OR REPLACE INTO panel_overrides(id, page, panels) VALUES(?, ?, ?)",
-                   [key(url), page, String(decoding: json, as: UTF8.self)])
+        return run("INSERT OR REPLACE INTO panel_overrides(id, page, panels, drawn) VALUES(?, ?, ?, ?)",
+                   [key(url), page, String(decoding: json, as: UTF8.self), drawn])
+    }
+
+    /// Whether every box of the page's override was drawn by hand.
+    static func panelsDrawn(_ url: URL, page: Int) -> Bool {
+        var drawn = false
+        run("SELECT drawn FROM panel_overrides WHERE id = ? AND page = ?", [key(url), page]) { drawn = sqlite3_column_int64($0, 0) != 0 }
+        return drawn
     }
 
     static func deletePanelOverride(_ url: URL, page: Int) {
         run("DELETE FROM panel_overrides WHERE id = ? AND page = ?", [key(url), page])
     }
 
-    /// Every saved override (comic key, page, panels), grouped by comic and in page order, for the training export.
-    static func allPanelOverrides() -> [(id: String, page: Int, panels: [Panel])] {
-        var rows: [(id: String, page: Int, panels: [Panel])] = []
-        run("SELECT id, page, panels FROM panel_overrides ORDER BY id, page") { row in
+    /// Every saved override (comic key, page, panels, all drawn by hand), grouped by comic and in page
+    /// order, for the training export.
+    static func allPanelOverrides() -> [(id: String, page: Int, panels: [Panel], drawn: Bool)] {
+        var rows: [(id: String, page: Int, panels: [Panel], drawn: Bool)] = []
+        run("SELECT id, page, panels, drawn FROM panel_overrides ORDER BY id, page") { row in
             guard let json = sqlite3_column_text(row, 2).map({ String(cString: $0) }),
                   let panels = try? JSONDecoder().decode([Panel].self, from: Data(json.utf8)) else { return }
-            rows.append((String(cString: sqlite3_column_text(row, 0)), Int(sqlite3_column_int64(row, 1)), panels))
+            rows.append((String(cString: sqlite3_column_text(row, 0)), Int(sqlite3_column_int64(row, 1)), panels,
+                         sqlite3_column_int64(row, 3) != 0))
         }
         return rows
     }
@@ -188,11 +198,12 @@ enum ReadingProgress {
         sqlite3_exec(handle, """
             PRAGMA journal_mode = WAL;
             CREATE TABLE IF NOT EXISTS progress(id TEXT PRIMARY KEY, page INTEGER, step INTEGER, total INTEGER, rtl INTEGER, opened REAL);
-            CREATE TABLE IF NOT EXISTS bookmarks(id TEXT, page INTEGER, step INTEGER, created REAL, PRIMARY KEY(id, page, step));
+            CREATE TABLE IF NOT EXISTS bookmarks(id TEXT, page INTEGER, step INTEGER, PRIMARY KEY(id, page, step));
             CREATE TABLE IF NOT EXISTS panel_overrides(id TEXT, page INTEGER, panels TEXT NOT NULL, PRIMARY KEY(id, page));
             """, nil, nil, nil)
-        // Added in phase 3; fails harmlessly once the column exists.
+        // Added in phase 3; each fails harmlessly once the column exists. drawn NULL (an edit saved before it) = not drawn.
         sqlite3_exec(handle, "ALTER TABLE progress ADD COLUMN mode TEXT", nil, nil, nil)
+        sqlite3_exec(handle, "ALTER TABLE panel_overrides ADD COLUMN drawn INTEGER", nil, nil, nil)
         connection = (databaseURL, handle)
         return handle
     }

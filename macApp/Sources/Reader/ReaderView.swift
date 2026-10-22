@@ -42,7 +42,7 @@ private struct ReaderContent: View {
     @State private var editing = false
 
     private var isReady: Bool { model.state == .ready }
-    private var marked: Bool { model.bookmarks.contains(model.here) }
+    private var marked: Bool { !model.marksHere.isEmpty }
 
     var body: some View {
         ZStack {
@@ -111,7 +111,7 @@ private struct ReaderContent: View {
         .focusEffectDisabled()
         .focused($focused)
         .onAppear { focused = true }
-        .onCopyCommand { model.copyItems() }   // Edit > Copy and ⌘C
+        .onCopyCommand { editing ? [] : model.copyItems() }   // Edit > Copy and ⌘C; not the hidden page behind the editor
         .onKeyPress(.leftArrow) { step(-1); return .handled }
         .onKeyPress(.rightArrow) { step(1); return .handled }
         .onKeyPress(.space, phases: .down) { press in
@@ -123,6 +123,9 @@ private struct ReaderContent: View {
         .onChange(of: [model.slots.page, model.slots.step]) {
             withAnimation(ReaderModel.cameraTween) { resetZoom() }
         }
+        // The peek holds auto-advance while the editor is open (and not after this window closes mid-edit).
+        .onChange(of: editing) { model.editingPanels = editing }
+        .onDisappear { model.editingPanels = false }
     }
 
     /// One reading step: a panel, a spread, or (scroll mode) most of a screen.
@@ -188,6 +191,8 @@ private struct ReaderContent: View {
         // way Android's Animatable camera does (a Canvas can't animate; it jump-cuts).
         let camera = model.slots.camera
         let filter = settings.nightFilter
+        // Dim darkens around a panel, and the whole page when the whole page shows (nothing is around it).
+        let around = filter == .dim && camera != .fullPage
         return ZStack(alignment: .topLeading) {
             if let cg = model.image {
                 Image(decorative: cg, scale: 1)
@@ -195,9 +200,9 @@ private struct ReaderContent: View {
                     .frame(width: CGFloat(cg.width), height: CGFloat(cg.height))
                     // Here dim darkens around the panel instead: drawn in page coordinates under the
                     // same transform, so it stays on the panel through camera tweens, zoom and pan.
-                    .modifier(NightFilterEffect(filter: filter == .dim ? .off : filter))
+                    .modifier(NightFilterEffect(filter: around ? .off : filter))
                     .overlay {
-                        if filter == .dim {
+                        if around {
                             OutsideCamera(camera: CGRect(x: CGFloat(camera.left), y: CGFloat(camera.top),
                                                          width: CGFloat(camera.width), height: CGFloat(camera.height)))
                                 .fill(Color.black.opacity(0.6), style: FillStyle(eoFill: true))
@@ -600,7 +605,7 @@ struct CameraFraming: GeometryEffect {
 }
 
 /// A night filter's colour change, for page pixels only (reader and peek). Dim darkens the whole
-/// page; Panels mode dims around the camera with OutsideCamera instead.
+/// page; on a panel in Panels mode OutsideCamera dims around it instead.
 struct NightFilterEffect: ViewModifier {
     let filter: NightFilter
 

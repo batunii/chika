@@ -33,6 +33,7 @@ enum TrainingExport {
                 alert.messageText = "Exported \(count(result.pages, "page"))"
                 alert.informativeText = "Images and labels are in images/train and labels/train of \(folder.lastPathComponent)."
                     + (result.missing == 0 ? "" : " Skipped \(count(result.missing, "edited page")) whose comic is no longer in the library.")
+                    + (result.undrawn == 0 ? "" : " Skipped \(count(result.undrawn, "edited page")) with boxes not drawn by hand: only a page whose every box you drew in the panel editor is exported.")
                     + (result.failed == 0 ? "" : " Could not read \(count(result.failed, "edited page")): the comic will not open, or has changed since the edit.")
                 alert.runModal()
             } catch {
@@ -42,11 +43,12 @@ enum TrainingExport {
     }
 
     /// Writes images/train/chika_<title>_p<page>.jpg and labels/train/<same>.txt under `folder` for each
-    /// override whose comic is in `comics` (progress key → file). `overrides` comes grouped by comic, as
-    /// allPanelOverrides returns it. Returns the pages written, the overrides skipped because their comic
-    /// left the library, and those whose page could not be read or converted.
-    static func export(_ overrides: [(id: String, page: Int, panels: [Panel])], comics: [String: URL],
-                       to folder: URL) throws -> (pages: Int, missing: Int, failed: Int) {
+    /// override whose comic is in `comics` (progress key → file) and whose boxes were all drawn by hand.
+    /// `overrides` comes grouped by comic, as allPanelOverrides returns it. Returns the pages written, the
+    /// overrides skipped because their comic left the library, those whose page could not be read or
+    /// converted, and those with a box not drawn by hand.
+    static func export(_ overrides: [(id: String, page: Int, panels: [Panel], drawn: Bool)], comics: [String: URL],
+                       to folder: URL) throws -> (pages: Int, missing: Int, failed: Int, undrawn: Int) {
         let images = folder.appendingPathComponent("images/train", isDirectory: true)
         let labels = folder.appendingPathComponent("labels/train", isDirectory: true)
         try FileManager.default.createDirectory(at: images, withIntermediateDirectories: true)
@@ -60,18 +62,19 @@ enum TrainingExport {
         // Comics whose titles would share a file name (APFS ignores case) also get 8 hex digits of their key.
         let titles = Set(overrides.map(\.id)).compactMap { comics[$0].map { safeTitle($0).lowercased() } }
         let clashing = Dictionary(grouping: titles, by: { $0 }).filter { $1.count > 1 }.keys
-        var pages = 0, missing = 0, failed = 0
+        var pages = 0, missing = 0, failed = 0, undrawn = 0
         var current: (id: String, stem: String, archive: ComicPages?)?
         for row in overrides {
             guard let url = comics[row.id] else { missing += 1; continue }
+            // Boxes the editor started from are the reader's zoom regions (padded 5.7% a side, neighbours merged,
+            // broad panels split), and merged or split boxes are rarely one panel: as labels they would teach the
+            // detector to pad, merge and split. Only a page drawn box by box is a true panel layout.
+            guard row.drawn else { undrawn += 1; continue }
             if current?.id != row.id {
                 let safe = safeTitle(url)
                 let id = SHA256.hash(data: Data(row.id.utf8)).prefix(4).map { String(format: "%02x", $0) }.joined()
                 current = (row.id, "chika_" + safe + (clashing.contains(safe.lowercased()) ? "_" + id : ""), try? ComicOpener.open(url))
             }
-            // shortcut: every saved box is labelled a panel, but untouched boxes are the reader's zoom regions (padded
-            // 5.7% a side, neighbours merged) and some are pieces of one panel (planner and gap-filler splits, Split
-            // across/down); record which boxes the user marked as true panels and export only those before training on many.
             // [.fullPage] (saved with no boxes) goes out as one page-sized panel, the way the reader shows it.
             let lines = row.panels.compactMap(\.yoloLabel)
             guard !lines.isEmpty else { continue }   // degenerate boxes only
@@ -83,7 +86,7 @@ enum TrainingExport {
             try (lines.joined(separator: "\n") + "\n").write(to: labels.appendingPathComponent(name + ".txt"), atomically: true, encoding: .utf8)
             pages += 1
         }
-        return (pages, missing, failed)
+        return (pages, missing, failed, undrawn)
     }
 
     /// The archive's own bytes when they already are JPEG, else the page decoded as the reader shows it

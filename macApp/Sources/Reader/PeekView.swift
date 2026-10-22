@@ -89,27 +89,30 @@ private struct PeekContent: View {
             model.advance(by: press.modifiers.contains(.shift) ? -1 : 1); return .handled
         }
         .onKeyPress("p", phases: .down) { _ in playing.toggle(); return .handled }
-        // Any move, manual or automatic (or a new dwell time), changes the id and so restarts the wait.
-        .task(id: playing ? [model.slots.page, model.slots.step, seconds] : []) { try? await autoAdvance() }
-        // Out of sight (minimized, or Chika hidden with ⌘H) the task keeps running, so stop rather than read on unseen.
-        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didMiniaturizeNotification)) { note in
-            if (note.object as? NSWindow) === window { playing = false }
+        // Any move, manual or automatic (or a new dwell time), changes the id and so restarts the wait. The
+        // pointer over the peek or the reader's panel editor open pauses it; the wait starts again after.
+        .task(id: playing && !hovering && !model.editingPanels ? [model.slots.page, model.slots.step, seconds] : []) {
+            try? await autoAdvance()
         }
-        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didHideNotification)) { _ in playing = false }
+        // Out of sight (minimized, Chika hidden, the screen locked, asleep or under the screen saver) the task
+        // keeps running, so stop rather than read on unseen.
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didChangeOcclusionStateNotification)) { note in
+            if let w = note.object as? NSWindow, w === window, !w.occlusionState.contains(.visible) { playing = false }
+        }
     }
 
-    /// While playing: wait the dwell, then step once. Stops at the end of the book.
+    /// While playing: once the page on screen has its image and panels, wait the dwell, then step once.
+    /// Stops at the end of the book.
     private func autoAdvance() async throws {
         guard playing else { return }
         // shortcut: each auto step saves progress and refreshes the library window, batch saves while playing if that shows up
+        while model.waitingForPage { try await Task.sleep(for: .milliseconds(300)) }
         // Clamped: the stored value can be edited outside the app, and 0 would race to the last page.
         try await Task.sleep(for: .seconds(min(max(seconds, 2), 20)))
         while model.advance(by: 1) == .blocked {
-            // Blocked while the comic opens, or with this page's panels unknown (detection still running),
-            // retries shortly; blocked otherwise is the end of the book or a comic that failed to open.
-            let waiting = model.state == .loading
-                || (model.state == .ready && model.mode == .panels && model.slots.regions == nil)
-            guard waiting else { playing = false; return }
+            // Blocked while a page reloads under the same slot (a mode change) retries shortly; blocked
+            // otherwise is the end of the book or a comic that failed to open.
+            guard model.waitingForPage else { playing = false; return }
             try await Task.sleep(for: .milliseconds(300))
         }
     }

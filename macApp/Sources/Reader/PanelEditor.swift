@@ -4,8 +4,8 @@ import ChikaCore
 
 /// The panel editor (⌘E, Panels mode): the whole page with its panels as numbered boxes in reading
 /// order. Drag on the page to draw a panel; click a box to select it (Shift-click adds); drag a
-/// selected box to move it, or its corners to resize. Saving stores the page's panels in place of
-/// detection. All pointer input is one drag gesture on the page, hit-tested here, so a drag across
+/// selected box to move it, or its corners to resize; drag a box's number onto another box to take
+/// its place in the reading order. Saving stores the page's panels in place of detection. All pointer input is one drag gesture on the page, hit-tested here, so a drag across
 /// an unselected box still draws.
 struct PanelEditor: View {
     @ObservedObject var model: ReaderModel
@@ -18,9 +18,15 @@ struct PanelEditor: View {
     @State private var selection: Set<Int> = []
     @State private var drag: Drag?
     @State private var drawing: Panel?
+    @State private var dropTarget: Int?   // the box under a dragged number
+    // Boxes drawn by hand (by value, so reordering and deleting need no bookkeeping; a move or resize
+    // carries the mark along). Only a page made of these is training data.
+    // shortcut: the database keeps one flag per page, so reopening a page drawn only in part forgets which
+    // boxes were drawn; store a flag per box if people correct pages over several sittings.
+    @State private var drawn: Set<Panel>
     @State private var saveFailed = false
 
-    private enum Drag { case draw(x: Float, y: Float), move(Int, from: Panel), resize(Int, anchorX: Float, anchorY: Float) }
+    private enum Drag { case draw(x: Float, y: Float), move(Int, from: Panel), resize(Int, anchorX: Float, anchorY: Float), reorder(Int) }
 
     init(model: ReaderModel, onClose: @escaping () -> Void) {
         self.model = model
@@ -29,7 +35,9 @@ struct PanelEditor: View {
         _image = State(initialValue: model.image)
         let regions = model.slots.regions ?? []
         // [.fullPage] means "no panels" (detection found none, or saved empty): as a box it would catch every click and drag.
-        _panels = State(initialValue: regions == [.fullPage] ? [] : regions)
+        let panels = regions == [.fullPage] ? [] : regions
+        _panels = State(initialValue: panels)
+        _drawn = State(initialValue: model.pageEdited && ReadingProgress.panelsDrawn(model.comicURL, page: model.slots.page) ? Set(panels) : [])
     }
 
     private var single: Int? { selection.count == 1 ? selection.first : nil }
@@ -67,13 +75,20 @@ struct PanelEditor: View {
         .gesture(DragGesture(minimumDistance: 0)
             .onChanged { dragged($0, size) }
             .onEnded { dropped($0, size) })
-        .help("Drag on the page to draw a panel. Click a box to select it, Shift-click to add one; drag a selected box to move it, or its corners to resize.")
+        .help("Drag on the page to draw a panel. Click a box to select it, Shift-click to add one; drag a selected box to move it, or its corners to resize; drag a box's number onto another box to reorder.")
+        // The boxes stay their own elements; Add panel is VoiceOver's way to draw one.
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Page \(page + 1)")
+        .accessibilityAction(named: "Add panel") {
+            panels.append(Panel(left: 0.25, top: 0.25, right: 0.75, bottom: 0.75))
+            selection = [panels.count - 1]
+        }
         .position(x: area.width / 2, y: area.height / 2)
     }
 
     private func box(_ i: Int, in size: CGSize) -> some View {
         let p = panels[i], selected = selection.contains(i)
-        let color = selected ? Chika.ochre : Chika.crimson
+        let color = selected || dropTarget == i ? Chika.ochre : Chika.crimson
         let w = CGFloat(p.width) * size.width, h = CGFloat(p.height) * size.height
         return Rectangle()
             .fill(color.opacity(selected ? 0.18 : 0.08))
@@ -93,7 +108,8 @@ struct PanelEditor: View {
             }
             .frame(width: w, height: h)
             .offset(x: CGFloat(p.left) * size.width, y: CGFloat(p.top) * size.height)
-            .help(selected ? "Panel \(i + 1): drag to move it, or a corner to resize" : "Panel \(i + 1): click to select, Shift-click to add")
+            .help(selected ? "Panel \(i + 1): drag to move it, a corner to resize, or its number onto another box to reorder"
+                           : "Panel \(i + 1): click to select, Shift-click to add, drag its number onto another box to reorder")
             .accessibilityElement()
             .accessibilityLabel("Panel \(i + 1)")
             .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
@@ -111,21 +127,37 @@ struct PanelEditor: View {
         switch drag {
         case .draw(let ax, let ay): drawing = PanelEditing.rect(ax, ay, x, y)
         case .move(let i, let start):
-            panels[i] = PanelEditing.moved(start, dx: Float(value.translation.width / size.width),
-                                           dy: Float(value.translation.height / size.height))
-        case .resize(let i, let ax, let ay): panels[i] = PanelEditing.rect(ax, ay, x, y)
+            replace(i, with: PanelEditing.moved(start, dx: Float(value.translation.width / size.width),
+                                                dy: Float(value.translation.height / size.height)))
+        case .resize(let i, let ax, let ay): replace(i, with: PanelEditing.rect(ax, ay, x, y))
+        case .reorder: dropTarget = PanelEditing.hit(panels, x: x, y: y)
         case nil: break
         }
     }
 
-    private func dropped(_ value: DragGesture.Value, _ size: CGSize) {
-        if drag == nil { click(value.location, size) }
-        else if let drawing { panels.append(drawing); selection = [panels.count - 1] }
-        drag = nil
-        drawing = nil
+    /// Box `i` becomes `panel`, still counted as drawn by hand if it was.
+    private func replace(_ i: Int, with panel: Panel) {
+        if drawn.remove(panels[i]) != nil { drawn.insert(panel) }
+        panels[i] = panel
     }
 
-    /// What a drag starting at `point` takes: a selected box's corner (resize) or body (move), else a new panel.
+    private func dropped(_ value: DragGesture.Value, _ size: CGSize) {
+        switch drag {
+        case nil: click(value.location, size)
+        case .draw:
+            if let drawing { panels.append(drawing); drawn.insert(drawing); selection = [panels.count - 1] }
+        case .reorder(let i):
+            // Takes the target's place in the reading order; the boxes between shift by one.
+            if let target = dropTarget { panels = PanelEditing.reordered(panels, moving: i, by: target - i); selection = [target] }
+        case .move, .resize: break
+        }
+        drag = nil
+        drawing = nil
+        dropTarget = nil
+    }
+
+    /// What a drag starting at `point` takes: a selected box's corner (resize), a box's number (reorder),
+    /// a selected box's body (move), else a new panel.
     private func grab(_ point: CGPoint, _ size: CGSize) -> Drag {
         let x = Float(point.x / size.width), y = Float(point.y / size.height)
         let reachX = Float(8 / size.width), reachY = Float(8 / size.height)   // 8 pt around a handle
@@ -136,6 +168,14 @@ struct PanelEditor: View {
                     return .resize(i, anchorX: ax, anchorY: ay)
                 }
             }
+        }
+        // The number badge: about 34 x 26 pt in the box's top-leading corner.
+        if let i = panels.indices.last(where: { i in   // last: drawn on top
+            let p = panels[i]
+            return x >= p.left && y >= p.top && x <= p.left + Float(34 / size.width) && y <= p.top + Float(26 / size.height)
+        }) {
+            selection = [i]
+            return .reorder(i)
         }
         if let i = PanelEditing.hit(panels, x: x, y: y, among: selection) { return .move(i, from: panels[i]) }
         return .draw(x: x, y: y)
@@ -234,6 +274,6 @@ struct PanelEditor: View {
     }
 
     private func save() {
-        if model.savePanels(panels, page: page) { onClose() } else { saveFailed = true }
+        if model.savePanels(panels, page: page, drawn: panels.allSatisfy(drawn.contains)) { onClose() } else { saveFailed = true }
     }
 }

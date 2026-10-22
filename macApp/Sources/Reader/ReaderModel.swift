@@ -37,6 +37,8 @@ final class ReaderModel: ObservableObject {
     @Published private(set) var pageAlpha: Double = 1   // per-page fade-in (Android's 280ms)
     @Published var rightToLeft: Bool
     @Published private(set) var bookmarks: [Bookmark]
+    /// The reader's panel editor is open: peek auto-advance holds so the reading position stays put.
+    @Published var editingPanels = false
     private(set) var pageCount = 1
     var title: String { comicURL.deletingPathExtension().lastPathComponent }
 
@@ -58,10 +60,23 @@ final class ReaderModel: ObservableObject {
     var onLastPage: Bool { visiblePages.contains(pageCount - 1) }
     /// The bookmark for where the reader is: the panel in panels mode, else the (first visible) page.
     var here: Bookmark { Bookmark(page: visiblePages[0], step: mode == .panels && slots.onPanel ? slots.step : -1) }
+    /// The bookmarks on screen: the one at `here` in panels mode, any on a visible page in Two pages and Scroll.
+    var marksHere: [Bookmark] { bookmarks.filter { mode == .panels ? $0 == here : visiblePages.contains($0.page) } }
     /// The current page's panels were drawn by hand in the panel editor.
     var pageEdited: Bool { mode == .panels && overrides[slots.page] != nil }
     /// The panel editor (⌘E) needs Panels mode with this page and its panels on screen.
     var canEditPanels: Bool { mode == .panels && image != nil && imagePages == visiblePages && slots.regions != nil && !detecting }
+    /// The comic is opening, or the page on screen still lacks its image or (panels mode) its panels:
+    /// peek auto-advance holds its wait until this clears.
+    // shortcut: Scroll skips the image check because the strip's scrolled(to:) never loads `image`; check it
+    // too once scrolled(to:) decodes the page.
+    var waitingForPage: Bool {
+        switch state {
+        case .loading: return true
+        case .failed: return false
+        case .ready: return (mode != .scroll && imagePages != visiblePages) || (mode == .panels && slots.regions == nil)
+        }
+    }
 
     init(comicURL: URL, settings: ChikaSettings) {
         self.comicURL = comicURL
@@ -136,7 +151,8 @@ final class ReaderModel: ObservableObject {
                 withAnimation(.easeOut(duration: 0.28)) { self.pageAlpha = 1 }
                 guard self.mode == .panels else { self.prefetchSpread(after: pages.last!); return }
                 let img = images[0]
-                if self.slots.regions == nil {
+                // Also when the regions came from a cache that a direction flip or a reset cleared during the load.
+                if self.slots.regions == nil || (self.overrides[target] ?? self.panelCache[target]) == nil {
                     // A bookmark's known panels glide in now. An undecodable page reads as one
                     // whole-page region so the reader can step past it.
                     if let known = self.overrides[target] ?? self.panelCache[target] {
@@ -149,7 +165,8 @@ final class ReaderModel: ObservableObject {
     }
 
     private func redetect() {
-        guard let img = image else { return }
+        // While the page loads, `image` is the previous page; the load detects once it lands.
+        guard imagePages == visiblePages, let img = image else { return }
         let rtl = rightToLeft
         let forPage = slots.page
         detecting = true
@@ -193,7 +210,8 @@ final class ReaderModel: ObservableObject {
         // Stale cache, no camera to move, or a page whose panels were drawn by hand.
         guard rtl == rightToLeft, mode == .panels, overrides[page] == nil else { return }
         panelCache[page] = found
-        guard page == slots.page else { return }
+        // A page still loading picks the panels up from the cache, so a bookmark's panel is never framed on the previous page.
+        guard page == slots.page, imagePages == visiblePages else { return }
         withAnimation(Self.cameraTween) { slots.setRegions(found) }
         detecting = false
     }
@@ -309,9 +327,11 @@ final class ReaderModel: ObservableObject {
         loadPage()
     }
 
+    /// Removes the bookmarks on screen, or bookmarks `here` if there are none.
     func toggleBookmark() {
         guard state == .ready else { return }   // before the comic opens, "here" is a placeholder page 0
-        ReadingProgress.toggleBookmark(comicURL, page: here.page, step: here.step)
+        let marks = marksHere
+        for mark in marks.isEmpty ? [here] : marks { ReadingProgress.toggleBookmark(comicURL, page: mark.page, step: mark.step) }
         bookmarks = ReadingProgress.bookmarks(comicURL)
     }
 
@@ -327,11 +347,12 @@ final class ReaderModel: ObservableObject {
         if mode == .panels && overrides[slots.page] == nil { redetect() }
     }
 
-    /// Saves the panel editor's [panels] (reading order) as [page]'s panels in place of detection.
+    /// Saves the panel editor's [panels] (reading order) as [page]'s panels in place of detection;
+    /// [drawn] = every box was drawn by hand, so the training export may use the page.
     /// False if the database write failed: nothing changes, so the editor can keep the edits.
-    func savePanels(_ panels: [Panel], page: Int) -> Bool {
+    func savePanels(_ panels: [Panel], page: Int, drawn: Bool = false) -> Bool {
         let panels = panels.isEmpty ? [.fullPage] : panels   // as detection does when it finds nothing
-        guard ReadingProgress.setPanelOverride(comicURL, page: page, panels: panels) else { return false }
+        guard ReadingProgress.setPanelOverride(comicURL, page: page, panels: panels, drawn: drawn) else { return false }
         overrides[page] = panels
         if page == slots.page {
             detecting = false   // a detection still running for this page is dropped when it lands
