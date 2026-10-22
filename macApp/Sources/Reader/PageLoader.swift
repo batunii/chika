@@ -12,7 +12,7 @@ import ChikaCore
 /// detector letterboxes from these dimensions, so matching them keeps detections identical across
 /// platforms. One PageLoader is created per open comic.
 final class PageLoader: @unchecked Sendable {   // thread-safe: NSCache is, and the archive read is locked
-    private let archive: CbzArchive
+    private let archive: ComicPages
     private let maxDimension: Int
     private let cache = NSCache<NSNumber, CGImage>()
     // ZIPFoundation's Archive isn't thread-safe, so the read is serialized; the decode runs outside
@@ -22,7 +22,7 @@ final class PageLoader: @unchecked Sendable {   // thread-safe: NSCache is, and 
 
     static let defaultMaxDimension = PageConstants.maxPageDimension
 
-    init(archive: CbzArchive, maxDimension: Int = defaultMaxDimension) {
+    init(archive: ComicPages, maxDimension: Int = defaultMaxDimension) {
         self.archive = archive
         self.maxDimension = maxDimension
         cache.totalCostLimit = PageLoader.defaultCacheBytes()

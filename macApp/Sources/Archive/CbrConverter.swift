@@ -2,8 +2,8 @@ import Foundation
 import ZIPFoundation
 import ChikaCore
 
-/// Converts an imported CBR/RAR archive to CBZ once, on import, so the reader only ever handles
-/// plain ZIP. Reading uses libarchive's BSD-licensed RAR5 reader (CbrReader); image filtering and
+/// Converts a CBR/RAR or CB7/7z archive to CBZ once (on import, or into the cache when read in
+/// place), so the reader only ever handles plain ZIP. libarchive reads both formats. Reading uses libarchive's BSD-licensed RAR5 reader (CbrReader); image filtering and
 /// page ordering reuse ChikaCore, identical to the CBZ path. Blocking: call it off the main thread.
 enum CbrConverter {
     enum ConversionError: LocalizedError {

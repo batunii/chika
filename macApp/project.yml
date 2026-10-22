@@ -65,7 +65,9 @@ targets:
             LSItemContentTypes:
               - com.chakra.comicreader.cbz
               - com.chakra.comicreader.cbr
+              - com.chakra.comicreader.cb7
               - public.zip-archive
+              - com.adobe.pdf
         # Exported (not Imported): the app OWNS these types, so the system knows .cbz is a zip and
         # .cbr a data file; otherwise the file importer greys these files out as unselectable.
         UTExportedTypeDeclarations:
@@ -83,6 +85,13 @@ targets:
             UTTypeTagSpecification:
               public.filename-extension:
                 - cbr
+          - UTTypeIdentifier: com.chakra.comicreader.cb7
+            UTTypeDescription: Comic Book 7z Archive
+            UTTypeConformsTo:
+              - public.data
+            UTTypeTagSpecification:
+              public.filename-extension:
+                - cb7
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.chakra.comicreader

@@ -32,17 +32,19 @@ final class LibraryStore: ObservableObject {
     private var unresolved: [Data] = []
     private var stream: FSEventStreamRef?
     private static let bookmarksKey = "chika.bookmarks.v1"
-    static let inPlaceExtensions: Set = ["cbz", "cbr"]
+    // PDFs are left out of folder scans (a watched Downloads folder is full of them); add one directly.
+    static let inPlaceExtensions: Set = ["cbz", "cbr", "cb7"]
 
     /// Types the file importer allows. Includes the app's exported CBZ/CBR types plus the generic
     /// zip/archive/rar families so a plain .zip or .rar comic is selectable too.
     static var importableTypes: [UTType] {
-        var types: [UTType] = [.zip, .archive]
-        if let cbz = UTType("com.chakra.comicreader.cbz") { types.append(cbz) }
-        if let cbr = UTType("com.chakra.comicreader.cbr") { types.append(cbr) }
-        if let rar = UTType("com.rarlab.rar-archive") { types.append(rar) }
+        var types: [UTType] = [.zip, .archive, .pdf]
+        for id in ["com.chakra.comicreader.cbz", "com.chakra.comicreader.cbr", "com.chakra.comicreader.cb7",
+                   "com.rarlab.rar-archive", "org.7-zip.7-zip-archive"] {
+            if let type = UTType(id) { types.append(type) }
+        }
         // macOS may associate these extensions with types declared by another installed reader.
-        for ext in ["cbz", "cbr", "rar"] {
+        for ext in ["cbz", "cbr", "rar", "cb7", "7z"] {
             if let type = UTType(filenameExtension: ext), !types.contains(type) { types.append(type) }
         }
         return types
@@ -70,7 +72,7 @@ final class LibraryStore: ObservableObject {
     func refresh() {
         let fm = FileManager.default
         var files = ((try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)) ?? [])
-            .filter { ["cbz", "zip"].contains($0.pathExtension.lowercased()) }
+            .filter { ["cbz", "zip", "pdf"].contains($0.pathExtension.lowercased()) }
         sources = [:]
         for root in roots {
             let found = root.isFolder
@@ -133,7 +135,7 @@ final class LibraryStore: ObservableObject {
         infoRead.formUnion(pending)
         infoTask = Task {
             let found = await Task.detached(priority: .utility) {
-                pending.reduce(into: [URL: ComicInfo]()) { map, url in map[url] = (try? ComicOpener.open(url))?.comicInfo }
+                pending.reduce(into: [URL: ComicInfo]()) { map, url in map[url] = ((try? ComicOpener.open(url)) as? CbzArchive)?.comicInfo }
             }.value
             info.merge(found) { $1 }
         }
@@ -252,7 +254,7 @@ final class LibraryStore: ObservableObject {
         case unsupported, noImages
         var errorDescription: String? {
             switch self {
-            case .unsupported: return "Choose a CBZ, CBR, ZIP, or RAR comic archive."
+            case .unsupported: return "Choose a CBZ, CBR, CB7, PDF, ZIP, RAR or 7z comic."
             case .noImages: return "No image pages found in this archive."
             }
         }
@@ -277,18 +279,19 @@ final class LibraryStore: ObservableObject {
 
         // Route by magic bytes (extension is only the fallback), matching Android's
         // ComicArchiveFactory, so a mislabeled ".cbz" that is really a RAR is converted.
-        let ready = staging.appendingPathComponent("ready.cbz")
-        switch ComicFormatDetector.detect(head: ComicOpener.leadingBytes(of: source), fileExtension: url.pathExtension) {
-        case .cbr: try CbrConverter.convertToCbz(source: source, destination: ready)
-        case .cbz: try fm.moveItem(at: source, to: ready)
+        let format = ComicFormatDetector.detect(head: ComicOpener.leadingBytes(of: source), fileExtension: url.pathExtension)
+        let ready = staging.appendingPathComponent("ready").appendingPathExtension(format == .pdf ? "pdf" : "cbz")
+        switch format {
+        case .cbr, .cb7: try CbrConverter.convertToCbz(source: source, destination: ready)
+        case .cbz, .pdf: try fm.moveItem(at: source, to: ready)
         case .unknown: throw ImportError.unsupported
         }
-        guard try CbzArchive(url: ready).pageCount > 0 else { throw ImportError.noImages }
+        guard try ComicOpener.open(ready).pageCount > 0 else { throw ImportError.noImages }
 
         let base = url.deletingPathExtension().lastPathComponent
         var n = 1
         while true {
-            let dest = dir.appendingPathComponent(n == 1 ? "\(base).cbz" : "\(base) \(n).cbz")
+            let dest = dir.appendingPathComponent(n == 1 ? base : "\(base) \(n)").appendingPathExtension(ready.pathExtension)
             // RENAME_EXCL fails instead of replacing, so even two concurrent imports never clobber.
             if renamex_np(ready.path, dest.path, UInt32(RENAME_EXCL)) == 0 { return dest }
             guard errno == EEXIST else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }

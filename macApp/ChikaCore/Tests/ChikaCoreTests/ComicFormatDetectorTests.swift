@@ -30,11 +30,18 @@ struct ComicFormatDetectorTests {
         #expect(ComicFormatDetector.detect(head: junk, fileExtension: "rar") == .cbr)
         #expect(ComicFormatDetector.detect(head: junk, fileExtension: "zip") == .cbz)
         #expect(ComicFormatDetector.detect(head: junk, fileExtension: "CBZ") == .cbz) // case-insensitive
-        #expect(ComicFormatDetector.detect(head: junk, fileExtension: "pdf") == .unknown)
+        #expect(ComicFormatDetector.detect(head: junk, fileExtension: "epub") == .unknown)
     }
 
     @Test func emptyHeadFallsBackToExtension() {
         #expect(ComicFormatDetector.detect(head: [], fileExtension: "cbr") == .cbr)
         #expect(ComicFormatDetector.detect(head: [], fileExtension: "") == .unknown)
+    }
+
+    @Test func sevenZipAndPdfByMagicThenExtension() {
+        #expect(ComicFormatDetector.detect(head: [0x37, 0x7A, 0xBC, 0xAF, 0x27, 0x1C, 0, 4], fileExtension: "cbz") == .cb7)
+        #expect(ComicFormatDetector.detect(head: Array("%PDF-1.7".utf8), fileExtension: "cbz") == .pdf)
+        #expect(ComicFormatDetector.detect(head: [], fileExtension: "CB7") == .cb7)
+        #expect(ComicFormatDetector.detect(head: [], fileExtension: "pdf") == .pdf)
     }
 }

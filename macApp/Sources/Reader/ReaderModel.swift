@@ -53,7 +53,7 @@ final class ReaderModel: ObservableObject {
         }
     }
 
-    private func loaded(_ opened: Result<CbzArchive, Error>) {
+    private func loaded(_ opened: Result<ComicPages, Error>) {
         do {
             let loader = PageLoader(archive: try opened.get())
             guard loader.pageCount > 0 else { state = .failed("No image pages found in this archive"); return }

@@ -190,7 +190,7 @@ struct LibraryView: View {
                 .padding(.bottom, 8)
             Text("YOUR LIBRARY STARTS HERE")
                 .font(.anton(30)).foregroundColor(Chika.cream)
-            Text("Import a CBZ, CBR, ZIP, or RAR comic to begin reading.")
+            Text("Import a CBZ, CBR, CB7 or PDF comic to begin reading.")
                 .font(.archivo(15)).foregroundColor(Chika.creamMuted)
             importButton.padding(.top, 4)
             Text("⌘O to import copies, ⇧⌘O to read files or folders in place, or drop them here")

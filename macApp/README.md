@@ -35,13 +35,14 @@ sandboxed; this is the same folder and bundle id the Catalyst app used, so its l
 
 ## Where the library lives
 
-- **Imported copies** (⌘O, or files dropped on the window) go to the Comics folder above; CBR is
-  converted to CBZ on import.
+- **Imported copies** (⌘O, or files dropped on the window) go to the Comics folder above. CBZ,
+  CBR, CB7 and PDF are accepted: CBR and CB7 are converted to CBZ on import, PDFs are kept as they are.
 - **Read in place** (⇧⌘O, or a folder dropped on the window): single comics or whole folders stay
   where they are. Chika keeps a security-scoped bookmark for each (entitlement
   `com.apple.security.files.bookmarks.app-scope`) and watches folders with FSEvents, so new CBZ/CBR
-  files appear by themselves. Removing one only forgets the bookmark; the files are never touched.
-  A CBR read in place is converted once into `Library/Caches/Chika/Converted` inside the container.
+  files appear by themselves
+  (PDFs are not picked up from folders; add them one by one). Removing one only forgets the bookmark; the files are never touched.
+  A CBR or CB7 read in place is converted once into `Library/Caches/Chika/Converted` inside the container.
 - **Progress** is a SQLite table at `Library/Application Support/Chika/progress.sqlite` inside the
   container, keyed by file identity (volume UUID + inode), so renaming a comic keeps its place. The
   first launch copies the old UserDefaults progress over and leaves it for the Catalyst app.

@@ -134,4 +134,28 @@ final class LibraryStoreTests: XCTestCase {
         XCTAssertEqual(arrange("vaughan", .title), [c])
         XCTAssertEqual(arrange("BET", .title), [b])
     }
+
+    func testCb7ConvertsAndPdfImportsAsIs() async throws {
+        let store = LibraryStore(directory: dir, defaults: ReadingProgress.defaults)
+        await store.importComic(from: try XCTUnwrap(Bundle(for: Self.self).url(forResource: "Tiny", withExtension: "cb7"))).value
+
+        let pdf = FileManager.default.temporaryDirectory.appendingPathComponent("Strip.pdf")
+        defer { try? FileManager.default.removeItem(at: pdf) }
+        var box = CGRect(x: 0, y: 0, width: 300, height: 400)
+        let context = try XCTUnwrap(CGContext(pdf as CFURL, mediaBox: &box, nil))
+        for _ in 0..<2 { context.beginPDFPage(nil); context.fill(box.insetBy(dx: 40, dy: 40)); context.endPDFPage() }
+        context.closePDF()
+        await store.importComic(from: pdf).value
+
+        XCTAssertNil(store.importError)
+        XCTAssertEqual(try files(), ["Strip.pdf", "Tiny.cbz"])
+        let cb7 = try XCTUnwrap(ComicOpener.open(dir.appendingPathComponent("Tiny.cbz")) as? CbzArchive)
+        XCTAssertEqual(cb7.pageCount, 2)
+        XCTAssertEqual(cb7.comicInfo?.series, "Tiny")   // ComicInfo.xml survives conversion
+
+        let pages = try ComicOpener.open(dir.appendingPathComponent("Strip.pdf"))
+        XCTAssertEqual(pages.pageCount, 2)
+        let page = try XCTUnwrap(PageLoader.decodeSampled(data: pages.readPage(1), maxDim: 2560))
+        XCTAssertEqual(page.height, 2560)   // rendered at the reader's page size
+    }
 }

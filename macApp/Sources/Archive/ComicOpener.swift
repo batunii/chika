@@ -1,17 +1,30 @@
 import Foundation
 import ChikaCore
 
-/// Opens any library comic for reading. Library copies are already CBZ; a CBR read in place is
-/// converted once into the caches folder (keyed by file identity) and again only when it changes.
-/// Blocking: call it off the main thread.
+/// What the reader, covers and import validation need from a comic, whatever its container.
+protocol ComicPages: AnyObject {
+    var pageCount: Int { get }
+    func readPage(_ index: Int) throws -> Data
+}
+
+extension CbzArchive: ComicPages {}
+
+/// Opens any library comic for reading. Imported CBR/CB7 copies are already CBZ; one read in place
+/// is converted once into the caches folder (keyed by file identity) and again only when it
+/// changes. PDFs open with PDFKit. Blocking: call it off the main thread.
 enum ComicOpener {
     static let cacheDir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
         .appendingPathComponent("Chika/Converted", isDirectory: true)
 
-    static func open(_ url: URL) throws -> CbzArchive { try CbzArchive(url: readableURL(url)) }
+    static func open(_ url: URL) throws -> ComicPages {
+        switch ComicFormatDetector.detect(head: leadingBytes(of: url), fileExtension: url.pathExtension) {
+        case .pdf: return try PdfComic(url: url)
+        case .cbr, .cb7: return try CbzArchive(url: converted(url))
+        case .cbz, .unknown: return try CbzArchive(url: url)
+        }
+    }
 
-    static func readableURL(_ url: URL) throws -> URL {
-        guard ComicFormatDetector.detect(head: leadingBytes(of: url), fileExtension: url.pathExtension) == .cbr else { return url }
+    private static func converted(_ url: URL) throws -> URL {
         let fm = FileManager.default
         let name = ReadingProgress.key(url).replacingOccurrences(of: "/", with: "_")
         let cached = cacheDir.appendingPathComponent(name).appendingPathExtension("cbz")
