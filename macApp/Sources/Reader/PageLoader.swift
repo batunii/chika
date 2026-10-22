@@ -30,19 +30,20 @@ final class PageLoader: @unchecked Sendable {   // thread-safe: NSCache is, and 
 
     var pageCount: Int { archive.pageCount }
 
-    /// Returns the (possibly cached) decoded image for [index], downsampled to the long-edge limit.
-    func loadPage(_ index: Int) -> CGImage? {
-        let key = NSNumber(value: index)
+    /// Returns the (possibly cached) decoded image for [index], downsampled to the long-edge limit,
+    /// or with [fitWidth] to the limit on its short edge, so a tall webtoon strip keeps its width.
+    func loadPage(_ index: Int, fitWidth: Bool = false) -> CGImage? {
+        let key = NSNumber(value: fitWidth ? ~index : index)   // ~index: its own cache slot
         if let hit = cache.object(forKey: key) { return hit }
         guard let data = lock.withLock({ try? archive.readPage(index) }),
-              let image = PageLoader.decodeSampled(data: data, maxDim: maxDimension) else { return nil }
+              let image = PageLoader.decodeSampled(data: data, maxDim: maxDimension, shortEdge: fitWidth) else { return nil }
         cache.setObject(image, forKey: key, cost: image.bytesPerRow * image.height)
         return image
     }
 
     /// Decodes [data], downsampled so its long edge fits [maxDim] using the same power-of-two rule
     /// as Android's BitmapFactory inSampleSize (so output dimensions match across platforms).
-    static func decodeSampled(data: Data, maxDim: Int) -> CGImage? {
+    static func decodeSampled(data: Data, maxDim: Int, shortEdge: Bool = false) -> CGImage? {
         guard let src = CGImageSourceCreateWithData(data as CFData, [kCGImageSourceShouldCache: false] as CFDictionary)
         else { return nil }
 
@@ -52,7 +53,7 @@ final class PageLoader: @unchecked Sendable {   // thread-safe: NSCache is, and 
         let h = (props?[kCGImagePropertyPixelHeight] as? Int) ?? 0
         let longEdge = max(w, h)
 
-        let sample = computeInSampleSize(longEdge: longEdge, maxDim: maxDim)
+        let sample = computeInSampleSize(longEdge: shortEdge ? min(w, h) : longEdge, maxDim: maxDim)
         // Target long edge after power-of-two sampling — equals Android's downsampled long edge.
         let targetLong = sample > 1 ? longEdge / sample : longEdge
 

@@ -32,6 +32,10 @@ private struct ReaderContent: View {
     @State private var scrub: Double = 0
     @State private var scrubbing = false
     @FocusState private var focused: Bool
+    // Scroll mode's position, moved by keys and page jumps; offset and viewport feed screen steps.
+    @State private var scroll = ScrollPosition(idType: Int.self)
+    @State private var scrollY: CGFloat = 0
+    @State private var viewport: CGFloat = 0
 
     private var isReady: Bool { model.state == .ready }
 
@@ -87,20 +91,38 @@ private struct ReaderContent: View {
         .focusEffectDisabled()
         .focused($focused)
         .onAppear { focused = true }
-        .onKeyPress(.leftArrow) { model.advance(by: -1); return .handled }
-        .onKeyPress(.rightArrow) { model.advance(by: 1); return .handled }
+        .onKeyPress(.leftArrow) { step(-1); return .handled }
+        .onKeyPress(.rightArrow) { step(1); return .handled }
         .onKeyPress(.space, phases: .down) { press in
-            model.advance(by: press.modifiers.contains(.shift) ? -1 : 1); return .handled
+            step(press.modifiers.contains(.shift) ? -1 : 1); return .handled
         }
-        .onKeyPress(.pageUp) { model.turnPage(next: false); return .handled }
-        .onKeyPress(.pageDown) { model.turnPage(next: true); return .handled }
+        .onKeyPress(.pageUp) { turn(next: false); return .handled }
+        .onKeyPress(.pageDown) { turn(next: true); return .handled }
         // Any step or page change lands un-zoomed, like Android.
         .onChange(of: [model.slots.page, model.slots.step]) {
             withAnimation(ReaderModel.cameraTween) { resetZoom() }
         }
     }
 
+    /// One reading step: a panel, a spread, or (scroll mode) most of a screen.
+    private func step(_ delta: Int) {
+        guard model.mode == .scroll else { model.advance(by: delta); return }
+        withAnimation(.easeOut(duration: 0.25)) { scroll.scrollTo(y: max(0, scrollY + CGFloat(delta) * viewport * 0.85)) }
+    }
+
+    private func turn(next: Bool) { model.mode == .scroll ? step(next ? 1 : -1) : model.turnPage(next: next) }
+
+    @ViewBuilder
     private func readerBody(size: CGSize) -> some View {
+        if model.mode == .scroll {
+            ScrollReader(model: model, position: $scroll, offset: $scrollY)
+                .onGeometryChange(for: CGFloat.self, of: { $0.size.height }) { viewport = $0 }
+        } else {
+            pagedBody(size: size)
+        }
+    }
+
+    private func pagedBody(size: CGSize) -> some View {
         Group {
             if model.mode == .spread { spreadPages(size: size) } else { panelPage(size: size) }
         }
@@ -173,6 +195,7 @@ private struct ReaderContent: View {
 
     // Top-bar status line, matching Android: "Page X/Y · panel N/M" / "· full page" / "· detecting…".
     private var pageStatus: String {
+        if model.mode == .scroll { return "Page \(model.slots.page + 1)/\(model.pageCount) · scroll" }
         if model.mode == .spread {
             let pages = model.visiblePages.map { "\($0 + 1)" }.joined(separator: "–")
             return "Page\(model.visiblePages.count > 1 ? "s" : "") \(pages)/\(model.pageCount) · two pages"
@@ -201,12 +224,12 @@ private struct ReaderContent: View {
                 Text(pageStatus).font(.archivo(9)).tracking(1.4).foregroundColor(Chika.creamMuted)
             }
             Spacer()
-            Button { model.advance(by: -1) } label: {
+            Button { step(-1) } label: {
                 Image(systemName: "chevron.left").foregroundColor(Chika.cream).frame(width: 36, height: 38)
             }
             .help("Previous panel (Left Arrow)")
             .accessibilityLabel("Previous panel")
-            Button { model.advance(by: 1) } label: {
+            Button { step(1) } label: {
                 Image(systemName: "chevron.right").foregroundColor(Chika.cream).frame(width: 36, height: 38)
             }
             .help("Next panel (Right Arrow)")
@@ -229,14 +252,14 @@ private struct ReaderContent: View {
                 }
                 .pickerStyle(.inline)
             } label: {
-                Image(systemName: model.mode == .spread ? "book" : "rectangle.split.2x2")
+                Image(systemName: ["panels": "rectangle.split.2x2", "spread": "book", "scroll": "scroll"][model.mode.rawValue]!)
                     .font(.system(size: 16, weight: .semibold))
                     .foregroundColor(Chika.cream)
             }
             .menuStyle(.borderlessButton)
             .menuIndicator(.hidden)
             .fixedSize()
-            .help("Reading mode: ⌘1 panels, ⌘2 two pages")
+            .help("Reading mode: ⌘1 panels, ⌘2 two pages, ⌘3 scroll")
             .accessibilityLabel("Reading mode")
             DirectionChip(rightToLeft: model.rightToLeft) { model.toggleDirection() }
             Button { openWindow(id: "peek", value: model.comicURL) } label: {
@@ -341,6 +364,66 @@ private struct ReaderContent: View {
         let y = min(max(raw.height, keep - scaledH - baseTop), ch - keep - baseTop)
         return CGSize(width: x, height: y)
     }
+}
+
+/// Scroll mode (webtoons): every page in one vertical strip at the window's width, loaded as it
+/// nears the screen. The page crossing the top edge is the reading position.
+private struct ScrollReader: View {
+    @ObservedObject var model: ReaderModel
+    @Binding var position: ScrollPosition
+    @Binding var offset: CGFloat
+    @State private var top = 0
+    // Only a moving strip reports its top page: layout and instant jumps (the first layout puts
+    // page 1 at the top before the jump to the saved page) must not move the reading position.
+    @State private var phase = ScrollPhase.idle
+
+    var body: some View {
+        GeometryReader { geo in
+            ScrollView {
+                LazyVStack(spacing: 0) {
+                    ForEach(0..<model.pageCount, id: \.self) { index in
+                        ScrollPage(model: model, index: index, width: geo.size.width) { page in
+                            guard phase != .idle else { return }
+                            top = page
+                            model.scrolled(to: page)
+                        }
+                    }
+                }
+                .scrollTargetLayout()
+            }
+            .scrollPosition($position, anchor: .top)
+            .onScrollGeometryChange(for: CGFloat.self, of: { $0.contentOffset.y }) { _, y in offset = y }
+            .onScrollPhaseChange { _, new in phase = new }
+        }
+        .onAppear { top = model.slots.page; position.scrollTo(id: top, anchor: .top) }
+        // Page jumps (scrubber, ⌘[ ⌘], the peek window) scroll the strip to that page.
+        .onChange(of: model.slots.page) { _, page in
+            if page != top { top = page; position.scrollTo(id: page, anchor: .top) }
+        }
+    }
+}
+
+private struct ScrollPage: View {
+    let model: ReaderModel   // not observed: a row only needs the page loader
+    let index: Int
+    let width: CGFloat
+    let atTop: (Int) -> Void
+    @State private var image: CGImage?
+
+    var body: some View {
+        ZStack {
+            if let image { Image(decorative: image, scale: 1).resizable() } else { ProgressView().tint(Chika.ochre) }
+        }
+        .frame(width: width, height: width * aspect)
+        .task(id: index) { image = await model.scrollImage(index) }
+        .onGeometryChange(for: Bool.self, of: { geo in
+            let frame = geo.frame(in: .scrollView)
+            return frame.minY <= 1 && frame.maxY > 1
+        }) { crossing in if crossing { atTop(index) } }
+    }
+
+    // Until it loads, a page is assumed to have a typical comic page's shape.
+    private var aspect: CGFloat { image.map { CGFloat($0.height) / CGFloat(max($0.width, 1)) } ?? 1.45 }
 }
 
 /// Frames the page exactly like the shared computePageDraw (contain-fit the camera at [fill]),

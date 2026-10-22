@@ -40,6 +40,8 @@ Each comic remembers its mode (the book/grid menu in the reader's top bar):
 - **Panels** (⌘1): the camera steps panel by panel; ← → or Space step, ⌘[ ⌘] turn pages.
 - **Two pages** (⌘2): facing pages side by side, mirrored for right-to-left. The cover and any
   double-page scan (wider than tall) stand alone. ← → step a spread.
+- **Scroll** (⌘3): every page in one vertical strip at the window's width, for webtoons. Swipe or
+  use ← → / Space / Page Up/Down to move most of a screen; ⌘[ ⌘] and the scrubber jump to a page.
 
 ## Where the library lives
 

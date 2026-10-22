@@ -1,5 +1,6 @@
 import XCTest
 import ChikaCore
+import ImageIO
 @testable import Chika
 
 final class CbrReaderTests: XCTestCase {
@@ -17,5 +18,21 @@ final class CbrReaderTests: XCTestCase {
         XCTAssertEqual(entries.count, archive.pageCount)
         XCTAssertGreaterThan(entries.count, 0)
         XCTAssertEqual(try Data(contentsOf: entries[0].file), try archive.readPage(0))
+    }
+}
+
+final class PageLoaderTests: XCTestCase {
+    // Scroll mode limits the short edge: a tall strip must keep its width, not shrink to a sliver.
+    func testShortEdgeLimitKeepsATallStripWide() throws {
+        let context = try XCTUnwrap(CGContext(data: nil, width: 300, height: 3000, bitsPerComponent: 8, bytesPerRow: 0,
+                                              space: CGColorSpaceCreateDeviceRGB(),
+                                              bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+        let data = NSMutableData()
+        let dest = try XCTUnwrap(CGImageDestinationCreateWithData(data, "public.png" as CFString, 1, nil))
+        CGImageDestinationAddImage(dest, try XCTUnwrap(context.makeImage()), nil)
+        XCTAssertTrue(CGImageDestinationFinalize(dest))
+
+        XCTAssertEqual(PageLoader.decodeSampled(data: data as Data, maxDim: 256, shortEdge: true)?.width, 300)
+        XCTAssertLessThan(try XCTUnwrap(PageLoader.decodeSampled(data: data as Data, maxDim: 256)?.width), 300)
     }
 }

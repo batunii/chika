@@ -1,10 +1,10 @@
 import SwiftUI
 import ChikaCore
 
-/// How a comic is read: panel by panel behind the camera, or two facing pages.
+/// How a comic is read: panel by panel behind the camera, two facing pages, or one vertical strip.
 enum ReadingMode: String, CaseIterable {
-    case panels, spread
-    var title: String { ["panels": "Panels", "spread": "Two pages"][rawValue]! }
+    case panels, spread, scroll
+    var title: String { ["panels": "Panels", "spread": "Two pages", "scroll": "Scroll"][rawValue]! }
 }
 
 /// One open comic: archive → pages, the page/slot state machine (ChikaCore.ReaderSlots), panel
@@ -181,7 +181,7 @@ final class ReaderModel: ObservableObject {
     }
 
     /// Steps through slots (intro → panels → outro), crossing into the neighbouring page at either
-    /// end. In spread mode a step is a whole spread.
+    /// end. In spread mode a step is a whole spread; in scroll mode a page (the strip follows).
     func advance(by delta: Int) {
         switch mode {
         case .panels:
@@ -191,12 +191,29 @@ final class ReaderModel: ObservableObject {
             let spreads = Spreads.pairs(pageCount: pageCount, wide: widePages)
             let i = (spreads.firstIndex { $0.contains(slots.page) } ?? 0) + delta
             if spreads.indices.contains(i) { goToPage(spreads[i][0]) }
+        case .scroll:
+            goToPage(slots.page + delta)
         }
     }
 
     /// Turns a whole page (a whole spread in spread mode), landing on its whole-page intro.
     /// [next] is reading-forward.
     func turnPage(next: Bool) { mode == .spread ? advance(by: next ? 1 : -1) : goToPage(slots.page + (next ? 1 : -1)) }
+
+    /// Scroll mode's page image, limited on its short edge so a tall strip keeps its width.
+    func scrollImage(_ index: Int) async -> CGImage? {
+        guard let loader else { return nil }
+        return await withCheckedContinuation { done in
+            Self.ioQueue.async { done.resume(returning: loader.loadPage(index, fitWidth: true)) }
+        }
+    }
+
+    /// Scroll mode: the page at the top of the strip is the reading position.
+    // shortcut: doesn't reload `image`, so a peek window opened in scroll mode keeps the page it
+    // started on; decode it here if peek and scroll get used together (it would slow fast flicks).
+    func scrolled(to page: Int) {
+        if page != slots.page { slots = ReaderSlots(page: page) }
+    }
 
     func setMode(_ newMode: ReadingMode) {
         guard newMode != mode else { return }
