@@ -265,7 +265,7 @@ final class ReaderModel: ObservableObject {
         }
     }
 
-    /// The camera's crop of `image`: panels mode's reading image, and outside Two pages what the peek shows.
+    /// The camera's crop of `image`: panels mode's reading image, and in Scroll what the peek shows.
     func cameraImage() -> CGImage? {
         guard let image else { return nil }
         let r = slots.camera.pixelRect(width: image.width, height: image.height)
@@ -274,7 +274,8 @@ final class ReaderModel: ObservableObject {
 
     /// Copy (⌘C, Edit > Copy): what the reader shows, or with [peek] what the peek window shows.
     func copyItems(peek: Bool = false) -> [NSItemProvider] {
-        (peek && mode != .spread ? cameraImage() : readingImage()).map { [NSItemProvider(object: NSImage(cgImage: $0, size: .zero))] } ?? []
+        // Only Scroll's peek keeps its own page in `image`; elsewhere readingImage holds back while a page loads.
+        (peek && mode == .scroll ? cameraImage() : readingImage()).map { [NSItemProvider(object: NSImage(cgImage: $0, size: .zero))] } ?? []
     }
 
     /// Pages joined left to right, each scaled to the tallest one's height.

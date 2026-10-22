@@ -71,7 +71,8 @@ spread in Two pages). ⇧⌘E (Export Panel…) saves that image as a PNG wherev
 "<title> p<page>.png".
 Both are also in the "…" menu at the end of the top bar, and do nothing while a new page is still
 loading. The image is the decoded page without the night filter: full size up to about 5000 px
-(larger scans are halved until they fit), and in Two pages both pages joined at the taller page's height.
+(larger scans are halved until they fit; in Scroll the limit is on the page's width, so a long strip
+keeps its full height), and in Two pages both pages joined at the taller page's height.
 
 ## Panel editor
 
