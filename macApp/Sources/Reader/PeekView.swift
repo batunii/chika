@@ -65,6 +65,7 @@ private struct PeekContent: View {
         .focusEffectDisabled()
         .focused($focused)
         .onAppear { focused = true }
+        .onCopyCommand { model.copyItems(peek: true) }   // Edit > Copy and ⌘C: the panel shown here
         .onKeyPress(.leftArrow) { model.advance(by: -1); return .handled }
         .onKeyPress(.rightArrow) { model.advance(by: 1); return .handled }
         .onKeyPress(.space, phases: .down) { press in

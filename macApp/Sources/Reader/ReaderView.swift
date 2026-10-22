@@ -1,4 +1,6 @@
 import SwiftUI
+import AppKit
+import UniformTypeIdentifiers
 import ChikaCore
 
 /// Panel-by-panel comic reader with Chika chrome: a branded header (back + title + status), reticle
@@ -72,7 +74,8 @@ private struct ReaderContent: View {
                 .keyboardShortcut(.escape, modifiers: [])
             }
         }
-        // Page turns have no visible button; these invisible ones carry ⌘[ / ⌘], the modes, ⌥⌘N and ⌘D.
+        // Page turns have no visible button; these invisible ones carry ⌘[ / ⌘], the modes, ⌥⌘N, ⌘D
+        // and ⇧⌘E (the More menu shows ⇧⌘E but a menu's shortcuts may not fire until it has been opened).
         .background {
             Group {
                 Button("Previous page") { model.turnPage(next: false) }
@@ -87,6 +90,8 @@ private struct ReaderContent: View {
                     .keyboardShortcut("n", modifiers: [.command, .option])
                 Button("Toggle bookmark") { model.toggleBookmark() }
                     .keyboardShortcut("d", modifiers: .command)
+                Button("Export panel") { exportPanel() }
+                    .keyboardShortcut("e", modifiers: [.command, .shift])
             }
             .opacity(0)
             .accessibilityHidden(true)
@@ -96,6 +101,7 @@ private struct ReaderContent: View {
         .focusEffectDisabled()
         .focused($focused)
         .onAppear { focused = true }
+        .onCopyCommand { model.copyItems() }   // Edit > Copy and ⌘C
         .onKeyPress(.leftArrow) { step(-1); return .handled }
         .onKeyPress(.rightArrow) { step(1); return .handled }
         .onKeyPress(.space, phases: .down) { press in
@@ -325,6 +331,22 @@ private struct ReaderContent: View {
             .keyboardShortcut("p", modifiers: [.command, .shift])
             .help("Peek: float the current panel (⌘⇧P)")
             .accessibilityLabel("Peek")
+            Menu {
+                // Sends Edit > Copy, so it lands in onCopyCommand like ⌘C does.
+                Button("Copy Panel") { NSApp.sendAction(#selector(NSText.copy(_:)), to: nil, from: nil) }
+                    .keyboardShortcut("c", modifiers: .command)
+                Button("Export Panel…") { exportPanel() }
+                    .keyboardShortcut("e", modifiers: [.command, .shift])
+            } label: {
+                Image(systemName: "ellipsis.circle")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundColor(Chika.cream)
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .help("More: copy the panel (⌘C) or export it as a PNG (⇧⌘E)")
+            .accessibilityLabel("More")
         }
         .buttonStyle(.plain)
         .padding(.leading, 12).padding(.trailing, 6).padding(.top, 8).padding(.bottom, 18)
@@ -382,6 +404,22 @@ private struct ReaderContent: View {
     private func tapZone(x: CGFloat, width: CGFloat) {
         if x < width / 3 { model.advance(by: -1) }
         else if x > width * 2 / 3 { model.advance(by: 1) }
+    }
+
+    /// Export Panel… (⇧⌘E): what is being read, saved as a PNG where the user picks.
+    private func exportPanel() {
+        guard let image = model.readingImage() else { NSSound.beep(); return }
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [.png]
+        panel.nameFieldStringValue = "\(model.title) p\(model.here.page + 1).png"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            guard let png = NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:])
+            else { throw CocoaError(.fileWriteUnknown) }
+            try png.write(to: url)
+        } catch {
+            NSAlert(error: error).runModal()
+        }
     }
 
     /// Whole page, also dropping any manual zoom (even when already on the whole page).

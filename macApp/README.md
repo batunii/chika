@@ -62,6 +62,16 @@ bookmarks in page order ("Page 4 · panel 2") and picking one jumps there (in Tw
 to its page). Bookmarks live next to the progress in the same database and go when the comic is
 deleted from the library.
 
+## Copy and export
+
+⌘C (Edit > Copy) puts what you are reading on the clipboard as an image: the current panel in
+Panels mode (the page when the whole page shows), both pages of the spread side by side in Two
+pages, the page at the top in Scroll. In the peek window ⌘C copies the panel the peek shows.
+⇧⌘E (Export Panel…) saves that image as a PNG wherever you choose, named "<title> p<page>.png".
+Both are also in the "…" menu at the end of the top bar, and do nothing while a new page is still
+loading. The image is the decoded page without the night filter: full size up to about 5000 px
+(larger scans are halved until they fit), and in Two pages both pages joined at the taller page's height.
+
 ## Where the library lives
 
 - **Imported copies** (⌘O, or files dropped on the window) go to the Comics folder above. CBZ,

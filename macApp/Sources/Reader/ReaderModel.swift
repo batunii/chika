@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 import ChikaCore
 
 /// How a comic is read: panel by panel behind the camera, two facing pages, or one vertical strip.
@@ -30,6 +31,7 @@ final class ReaderModel: ObservableObject {
     }
     @Published private(set) var image: CGImage?
     @Published private(set) var facing: CGImage?   // spread mode: the spread's second page
+    private var imagePages: [Int] = []   // the pages `image` and `facing` hold; behind slots while one loads
     @Published private(set) var mode: ReadingMode
     @Published private(set) var detecting = false
     @Published private(set) var pageAlpha: Double = 1   // per-page fade-in (Android's 280ms)
@@ -118,6 +120,7 @@ final class ReaderModel: ObservableObject {
                 if self.visiblePages != pages { self.loadPage(); return }
                 self.image = images[0]
                 self.facing = images.count > 1 ? images[1] : nil
+                self.imagePages = pages
                 withAnimation(.easeOut(duration: 0.28)) { self.pageAlpha = 1 }
                 guard self.mode == .panels else { self.prefetchSpread(after: pages.last!); return }
                 let img = images[0]
@@ -217,6 +220,50 @@ final class ReaderModel: ObservableObject {
     // started on; decode it here if peek and scroll get used together (it would slow fast flicks).
     func scrolled(to page: Int) {
         if page != slots.page { slots = ReaderSlots(page: page) }
+    }
+
+    /// What is being read, as one image (Copy and Export Panel): the camera's crop of the page in
+    /// panels mode, the spread's pages side by side as on screen, the page at the top in scroll mode.
+    /// Nil while the page is still loading, so a quick ⇧⌘E never saves the previous page.
+    func readingImage() -> CGImage? {
+        switch mode {
+        case .panels, .spread:
+            guard imagePages == visiblePages else { return nil }
+            if mode == .panels { return cameraImage() }
+            let pages = [image, facing].compactMap { $0 }
+            return Self.sideBySide(rightToLeft ? pages.reversed() : pages)
+        case .scroll:
+            // shortcut: decodes on the main thread, a cache hit while the page is on screen (the strip
+            // loaded it with the same key); move to ioQueue if a copy ever stalls.
+            return loader?.loadPage(slots.page, fitWidth: true)
+        }
+    }
+
+    /// The camera's crop of `image`: panels mode's reading image, and in every mode what the peek shows.
+    func cameraImage() -> CGImage? {
+        guard let image else { return nil }
+        let r = slots.camera.pixelRect(width: image.width, height: image.height)
+        return image.cropping(to: CGRect(x: r.x, y: r.y, width: r.width, height: r.height))
+    }
+
+    /// Copy (⌘C, Edit > Copy): what the reader shows, or with [peek] what the peek window shows.
+    func copyItems(peek: Bool = false) -> [NSItemProvider] {
+        (peek ? cameraImage() : readingImage()).map { [NSItemProvider(object: NSImage(cgImage: $0, size: .zero))] } ?? []
+    }
+
+    /// Pages joined left to right, each scaled to the tallest one's height.
+    nonisolated static func sideBySide(_ pages: [CGImage]) -> CGImage? {
+        guard let height = pages.map(\.height).max() else { return nil }
+        let widths = pages.map { $0.width * height / $0.height }
+        guard let context = CGContext(data: nil, width: widths.reduce(0, +), height: height, bitsPerComponent: 8,
+                                      bytesPerRow: 0, space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
+        var x = 0
+        for (page, width) in zip(pages, widths) {
+            context.draw(page, in: CGRect(x: x, y: 0, width: width, height: height))
+            x += width
+        }
+        return context.makeImage()
     }
 
     func setMode(_ newMode: ReadingMode) {
