@@ -89,6 +89,7 @@ struct LibraryView: View {
             opened = ReadingProgress.openedMap()
         }
         .onOpenURL { url in library.add(url) }
+        .handlesExternalEvents(preferring: ["*"], allowing: ["*"])   // see ChikaApp
     }
 
     private var libraryControls: some View {

@@ -10,12 +10,17 @@ struct ChikaApp: App {
     var body: some Scene {
         WindowGroup("Chika") { LibraryView().environmentObject(settings).environmentObject(readers).environmentObject(library) }
             .defaultSize(width: 1000, height: 740)
+            // Opened files and folders go to the open library window (LibraryView prefers them);
+            // only this group may make a window for one, and only when no library window is open.
+            .handlesExternalEvents(matching: ["*"])
         WindowGroup("Reader", id: "reader", for: URL.self) { $url in
             if let url { ReaderView(comicURL: url).environmentObject(settings).environmentObject(readers).environmentObject(library) }
         }
+        .handlesExternalEvents(matching: [])
         WindowGroup("Peek", id: "peek", for: URL.self) { $url in
             if let url { PeekView(comicURL: url).environmentObject(settings).environmentObject(readers) }
         }
+        .handlesExternalEvents(matching: [])
         .windowStyle(.hiddenTitleBar)
         .windowLevel(.floating)
         .windowResizability(.contentSize)

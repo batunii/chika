@@ -18,7 +18,9 @@ final class LibraryStoreTests: XCTestCase {
         ReadingProgress.defaults.removePersistentDomain(forName: "chika.tests")
         ReadingProgress.defaults = .standard
         try? FileManager.default.removeItem(at: dir)
-        try? FileManager.default.removeItem(at: ReadingProgress.databaseURL)
+        for suffix in ["", "-wal", "-shm"] {   // WAL mode keeps two side files next to the database
+            try? FileManager.default.removeItem(atPath: ReadingProgress.databaseURL.path + suffix)
+        }
     }
 
     private func files() throws -> [String] {
