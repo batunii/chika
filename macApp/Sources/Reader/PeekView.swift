@@ -213,6 +213,9 @@ private struct PeekWindowConfigurator: NSViewRepresentable {
                 // (arrows, Space, P, ⌘C) and minimize like a titled one.
                 window.styleMask.formUnion([.resizable, .miniaturizable])
                 window.hasShadow = true
+                // A plain window opens at its content's largest size, often off screen: start small and centred.
+                window.setContentSize(CGSize(width: 420, height: 420 * aspect.height / aspect.width))
+                window.center()
                 self.window = window
             }
             if window.aspectRatio != aspect {
