@@ -33,6 +33,14 @@ To try a comic: copy `iosApp/ci/SyntheticManga.cbz` somewhere (the repo ignores 
 Comics are stored in `~/Library/Containers/com.chakra.comicreader/Data/Documents/Comics` (the app is
 sandboxed; this is the same folder and bundle id the Catalyst app used, so its library and progress carry over).
 
+## Reading modes
+
+Each comic remembers its mode (the book/grid menu in the reader's top bar):
+
+- **Panels** (⌘1): the camera steps panel by panel; ← → or Space step, ⌘[ ⌘] turn pages.
+- **Two pages** (⌘2): facing pages side by side, mirrored for right-to-left. The cover and any
+  double-page scan (wider than tall) stand alone. ← → step a spread.
+
 ## Where the library lives
 
 - **Imported copies** (⌘O, or files dropped on the window) go to the Comics folder above. CBZ,

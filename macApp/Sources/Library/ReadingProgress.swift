@@ -10,6 +10,7 @@ struct Progress: Codable, Equatable {
     // Reading direction for THIS comic. nil means "never chosen for this comic" → fall back to the
     // global default.
     var rtl: Bool?
+    var mode: String?  // ReadingMode raw value; nil = never chosen → panels
 }
 
 /// Progress and last-opened time in one small SQLite table keyed by file identity (volume UUID +
@@ -36,7 +37,7 @@ enum ReadingProgress {
     /// Every comic's progress keyed by `key(_:)`. Read once, look up many (the library cards).
     static func all() -> [String: Progress] {
         var map: [String: Progress] = [:]
-        run("SELECT id, page, step, total, rtl FROM progress") { row in
+        run("SELECT id, page, step, total, rtl, mode FROM progress") { row in
             if let p = progress(row, from: 1) { map[String(cString: sqlite3_column_text(row, 0))] = p }
         }
         return map
@@ -44,18 +45,19 @@ enum ReadingProgress {
 
     static func get(_ url: URL) -> Progress? {
         var found: Progress?
-        run("SELECT page, step, total, rtl FROM progress WHERE id = ?", [key(url)]) { found = progress($0, from: 0) }
+        run("SELECT page, step, total, rtl, mode FROM progress WHERE id = ?", [key(url)]) { found = progress($0, from: 0) }
         return found
     }
 
     /// Effective reading direction for a comic: its saved choice if any, else the global default.
     static func readingDirection(_ url: URL, default fallback: Bool) -> Bool { get(url)?.rtl ?? fallback }
 
-    static func set(_ url: URL, page: Int, step: Int, total: Int, rtl: Bool) {
+    static func set(_ url: URL, page: Int, step: Int, total: Int, rtl: Bool, mode: String) {
         run("""
-            INSERT INTO progress(id, page, step, total, rtl) VALUES(?, ?, ?, ?, ?)
-            ON CONFLICT(id) DO UPDATE SET page = excluded.page, step = excluded.step, total = excluded.total, rtl = excluded.rtl
-            """, [key(url), page, step, total, rtl])
+            INSERT INTO progress(id, page, step, total, rtl, mode) VALUES(?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET page = excluded.page, step = excluded.step, total = excluded.total,
+                rtl = excluded.rtl, mode = excluded.mode
+            """, [key(url), page, step, total, rtl, mode])
         changed()
     }
 
@@ -122,6 +124,8 @@ enum ReadingProgress {
             PRAGMA journal_mode = WAL;
             CREATE TABLE IF NOT EXISTS progress(id TEXT PRIMARY KEY, page INTEGER, step INTEGER, total INTEGER, rtl INTEGER, opened REAL);
             """, nil, nil, nil)
+        // Added in phase 3; fails harmlessly once the column exists.
+        sqlite3_exec(handle, "ALTER TABLE progress ADD COLUMN mode TEXT", nil, nil, nil)
         connection = (databaseURL, handle)
         return handle
     }
@@ -149,7 +153,8 @@ enum ReadingProgress {
         return Progress(page: Int(sqlite3_column_int64(row, col)),
                         step: Int(sqlite3_column_int64(row, col + 1)),
                         total: Int(sqlite3_column_int64(row, col + 2)),
-                        rtl: sqlite3_column_type(row, col + 3) == SQLITE_NULL ? nil : sqlite3_column_int64(row, col + 3) != 0)
+                        rtl: sqlite3_column_type(row, col + 3) == SQLITE_NULL ? nil : sqlite3_column_int64(row, col + 3) != 0,
+                        mode: sqlite3_column_text(row, col + 4).map { String(cString: $0) })
     }
 
     private static func changed() { NotificationCenter.default.post(name: didChange, object: nil) }

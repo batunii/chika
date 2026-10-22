@@ -74,6 +74,10 @@ private struct ReaderContent: View {
                     .keyboardShortcut("[", modifiers: .command)
                 Button("Next page") { model.turnPage(next: true) }
                     .keyboardShortcut("]", modifiers: .command)
+                ForEach(Array(ReadingMode.allCases.enumerated()), id: \.element) { i, mode in
+                    Button(mode.title) { model.setMode(mode) }
+                        .keyboardShortcut(KeyEquivalent(Character("\(i + 1)")), modifiers: .command)
+                }
             }
             .opacity(0)
             .accessibilityHidden(true)
@@ -96,24 +100,9 @@ private struct ReaderContent: View {
         }
     }
 
-    @ViewBuilder
     private func readerBody(size: CGSize) -> some View {
-        // The page is a plain Image carried by one animatable transform (CameraFraming) that runs
-        // the shared computePageDraw per frame — so stepping between panels TWEENS the camera the
-        // way Android's Animatable camera does (a Canvas can't animate; it jump-cuts).
-        let camera = model.slots.camera
-        ZStack(alignment: .topLeading) {
-            if let cg = model.image {
-                Image(decorative: cg, scale: 1)
-                    .resizable()
-                    .frame(width: CGFloat(cg.width), height: CGFloat(cg.height))
-                    .modifier(CameraFraming(
-                        camL: CGFloat(camera.left), camT: CGFloat(camera.top),
-                        camR: CGFloat(camera.right), camB: CGFloat(camera.bottom),
-                        zoom: zoom, panX: pan.width, panY: pan.height,
-                        container: size))
-                    .opacity(model.pageAlpha)
-            }
+        Group {
+            if model.mode == .spread { spreadPages(size: size) } else { panelPage(size: size) }
         }
         // topLeading alignment is load-bearing: the bitmap-sized Image makes the ZStack oversized,
         // and a default (.center) frame alignment would shift the image's local origin — the
@@ -146,8 +135,48 @@ private struct ReaderContent: View {
         )
     }
 
+    private func panelPage(size: CGSize) -> some View {
+        // The page is a plain Image carried by one animatable transform (CameraFraming) that runs
+        // the shared computePageDraw per frame — so stepping between panels TWEENS the camera the
+        // way Android's Animatable camera does (a Canvas can't animate; it jump-cuts).
+        let camera = model.slots.camera
+        return ZStack(alignment: .topLeading) {
+            if let cg = model.image {
+                Image(decorative: cg, scale: 1)
+                    .resizable()
+                    .frame(width: CGFloat(cg.width), height: CGFloat(cg.height))
+                    .modifier(CameraFraming(
+                        camL: CGFloat(camera.left), camT: CGFloat(camera.top),
+                        camR: CGFloat(camera.right), camB: CGFloat(camera.bottom),
+                        zoom: zoom, panX: pan.width, panY: pan.height,
+                        container: size))
+                    .opacity(model.pageAlpha)
+            }
+        }
+    }
+
+    /// Spread mode: the spread's pages side by side (mirrored for right-to-left), fitted together.
+    /// Zoom scales about the centre; drag pans within the zoomed overhang.
+    private func spreadPages(size: CGSize) -> some View {
+        let pages = [model.image, model.facing].compactMap { $0 }
+        return HStack(spacing: 0) {
+            ForEach(Array((model.rightToLeft ? pages.reversed() : pages).enumerated()), id: \.offset) { _, page in
+                Image(decorative: page, scale: 1).resizable().scaledToFit()
+            }
+        }
+        .frame(maxWidth: size.width * 0.98, maxHeight: size.height * 0.98)
+        .scaleEffect(zoom)
+        .offset(pan)
+        .opacity(model.pageAlpha)
+        .frame(width: size.width, height: size.height)
+    }
+
     // Top-bar status line, matching Android: "Page X/Y · panel N/M" / "· full page" / "· detecting…".
     private var pageStatus: String {
+        if model.mode == .spread {
+            let pages = model.visiblePages.map { "\($0 + 1)" }.joined(separator: "–")
+            return "Page\(model.visiblePages.count > 1 ? "s" : "") \(pages)/\(model.pageCount) · two pages"
+        }
         let prefix = "Page \(model.slots.page + 1)/\(model.pageCount) · "
         if model.detecting { return prefix + "detecting…" }
         if model.slots.onPanel { return prefix + "panel \(model.slots.step + 1)/\(model.slots.panelCount)" }
@@ -192,6 +221,23 @@ private struct ReaderContent: View {
             .keyboardShortcut("0", modifiers: .command)
             .help("Show whole page (⌘0)")
             .accessibilityLabel("Show whole page")
+            .opacity(model.mode == .panels ? 1 : 0)
+            .disabled(model.mode != .panels)
+            Menu {
+                Picker("Reading mode", selection: Binding(get: { model.mode }, set: { model.setMode($0) })) {
+                    ForEach(ReadingMode.allCases, id: \.self) { Text($0.title).tag($0) }
+                }
+                .pickerStyle(.inline)
+            } label: {
+                Image(systemName: model.mode == .spread ? "book" : "rectangle.split.2x2")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundColor(Chika.cream)
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .help("Reading mode: ⌘1 panels, ⌘2 two pages")
+            .accessibilityLabel("Reading mode")
             DirectionChip(rightToLeft: model.rightToLeft) { model.toggleDirection() }
             Button { openWindow(id: "peek", value: model.comicURL) } label: {
                 Image(systemName: "pip.enter")
@@ -213,7 +259,7 @@ private struct ReaderContent: View {
         VStack(spacing: 0) {
             HStack {
                 // On the last page, the next issue of the series (ComicInfo.xml) replaces the hint.
-                if model.slots.page == model.pageCount - 1, let next = library.nextIssue(after: model.comicURL) {
+                if model.onLastPage, let next = library.nextIssue(after: model.comicURL) {
                     Button {
                         openWindow(id: "reader", value: next)
                         dismiss()
@@ -275,6 +321,10 @@ private struct ReaderContent: View {
     // exposes side background), vertical "float" keeping ≥15% on screen — Android's clampPan ported
     // onto the same computePageDraw transform (scale about centre, then translate by pan).
     private func clampPan(_ raw: CGSize, viewSize: CGSize) -> CGSize {
+        if model.mode == .spread {
+            let x = viewSize.width * (zoom - 1) / 2, y = viewSize.height * (zoom - 1) / 2
+            return CGSize(width: min(max(raw.width, -x), x), height: min(max(raw.height, -y), y))
+        }
         guard let image = model.image else { return raw }
         let cw = viewSize.width, ch = viewSize.height
         let draw = computePageDraw(

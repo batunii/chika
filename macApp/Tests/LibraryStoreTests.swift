@@ -1,4 +1,5 @@
 import XCTest
+import SQLite3
 import ZIPFoundation
 import ChikaCore
 @testable import Chika
@@ -62,7 +63,7 @@ final class LibraryStoreTests: XCTestCase {
         try FileManager.default.moveItem(at: dir.appendingPathComponent("Old.cbz"), to: renamed)
 
         XCTAssertEqual(ReadingProgress.get(renamed), legacy["Old.cbz"])
-        ReadingProgress.set(renamed, page: 4, step: -1, total: 8, rtl: false)
+        ReadingProgress.set(renamed, page: 4, step: -1, total: 8, rtl: false, mode: "panels")
         XCTAssertEqual(ReadingProgress.all()[ReadingProgress.key(renamed)]?.page, 4)
     }
 
@@ -159,5 +160,22 @@ final class LibraryStoreTests: XCTestCase {
         XCTAssertEqual(pages.pageCount, 2)
         let page = try XCTUnwrap(PageLoader.decodeSampled(data: pages.readPage(1), maxDim: 2560))
         XCTAssertEqual(page.height, 2560)   // rendered at the reader's page size
+    }
+
+    func testAPhase2DatabaseGainsTheModeColumnAndKeepsItsRows() throws {
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let url = dir.appendingPathComponent("Old.cbz")
+        try FileManager.default.copyItem(at: comic, to: url)
+        var db: OpaquePointer?
+        XCTAssertEqual(sqlite3_open(ReadingProgress.databaseURL.path, &db), SQLITE_OK)
+        sqlite3_exec(db, """
+            CREATE TABLE progress(id TEXT PRIMARY KEY, page INTEGER, step INTEGER, total INTEGER, rtl INTEGER, opened REAL);
+            INSERT INTO progress VALUES('\(ReadingProgress.key(url))', 2, 0, 3, 1, NULL);
+            """, nil, nil, nil)
+        sqlite3_close(db)
+
+        XCTAssertEqual(ReadingProgress.get(url), Progress(page: 2, step: 0, total: 3, rtl: true, mode: nil))
+        ReadingProgress.set(url, page: 2, step: -1, total: 3, rtl: true, mode: "spread")
+        XCTAssertEqual(ReadingProgress.get(url)?.mode, "spread")
     }
 }
