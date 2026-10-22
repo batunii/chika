@@ -13,6 +13,13 @@ struct ChikaApp: App {
             // Opened files and folders go to the open library window (LibraryView prefers them);
             // only this group may make a window for one, and only when no library window is open.
             .handlesExternalEvents(matching: ["*"])
+            .commands {
+                CommandGroup(after: .importExport) {
+                    Button("Export Panel Corrections…") { TrainingExport.run(library: library) }
+                        .help("Save the pages whose panels you corrected as training data for the panel detector")
+                        .accessibilityLabel("Export panel corrections as training data")
+                }
+            }
         WindowGroup("Reader", id: "reader", for: URL.self) { $url in
             if let url { ReaderView(comicURL: url).environmentObject(settings).environmentObject(readers).environmentObject(library) }
         }

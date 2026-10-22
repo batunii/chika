@@ -1,5 +1,7 @@
 import XCTest
+import AppKit
 import ChikaCore
+import ZIPFoundation
 @testable import Chika
 
 @MainActor
@@ -43,6 +45,67 @@ final class PanelOverrideTests: XCTestCase {
         ReadingProgress.clear(a)
         XCTAssertNil(ReadingProgress.panelOverride(a, page: 2))
         XCTAssertEqual(ReadingProgress.panelOverride(b, page: 2), [left])
+    }
+
+    func testOverridesListAndExportAsYoloTrainingPairs() throws {
+        let a = dir.appendingPathComponent("A b.cbz"), gone = dir.appendingPathComponent("Gone.cbz")
+        let b = dir.appendingPathComponent("sub/a B.cbz")   // same name but for case: one file on APFS if keyed by title
+        try FileManager.default.createDirectory(at: b.deletingLastPathComponent(), withIntermediateDirectories: true)
+        for url in [a, gone, b] { try FileManager.default.copyItem(at: comic, to: url) }
+        ReadingProgress.setPanelOverride(a, page: 2, panels: [left, right])
+        ReadingProgress.setPanelOverride(a, page: 0, panels: [Panel(left: 0.5, top: 0.5, right: 0.5, bottom: 1)])   // degenerate only
+        ReadingProgress.setPanelOverride(a, page: 1, panels: [.fullPage])   // saved with no panels: one page-sized panel
+        ReadingProgress.setPanelOverride(a, page: 99, panels: [left])   // past the end: the file shrank
+        ReadingProgress.setPanelOverride(gone, page: 1, panels: [left])
+        ReadingProgress.setPanelOverride(b, page: 2, panels: [left])
+
+        let rows = ReadingProgress.allPanelOverrides()
+        let ka = ReadingProgress.key(a), kg = ReadingProgress.key(gone), kb = ReadingProgress.key(b)
+        XCTAssertEqual(rows.map { "\($0.id) \($0.page)" }.sorted(),
+                       ["\(ka) 0", "\(ka) 1", "\(ka) 2", "\(ka) 99", "\(kg) 1", "\(kb) 2"].sorted())
+        XCTAssertEqual(rows.first { $0.id == ka && $0.page == 2 }?.panels, [left, right])
+
+        let out = dir.appendingPathComponent("export")
+        let result = try TrainingExport.export(rows, comics: [ka: a, kb: b], to: out)
+        XCTAssertEqual(result.pages, 3)
+        XCTAssertEqual(result.missing, 1)
+        XCTAssertEqual(result.failed, 1)   // page 99
+        let names = try FileManager.default.contentsOfDirectory(atPath: out.appendingPathComponent("labels/train").path)
+        XCTAssertEqual(names.count, 3)
+        let name = try XCTUnwrap(names.first { $0.hasPrefix("chika_A_b_") && $0.hasSuffix("_p003.txt") }).dropLast(4)
+        XCTAssertEqual(name.count, "chika_A_b_12345678_p003".count)   // the titles clash, so each carries its id
+        XCTAssertEqual(try String(contentsOf: out.appendingPathComponent("labels/train/" + name.replacingOccurrences(of: "_p003", with: "_p002.txt")), encoding: .utf8),
+                       "0 0.500000 0.500000 1.000000 1.000000\n")
+        XCTAssertEqual(try String(contentsOf: out.appendingPathComponent("labels/train/\(name).txt"), encoding: .utf8),
+                       "0 0.250000 0.500000 0.500000 1.000000\n0 0.750000 0.500000 0.500000 1.000000\n")
+        XCTAssertEqual(try Data(contentsOf: out.appendingPathComponent("images/train/\(name).jpg")),
+                       try CbzArchive(url: a).readPage(2))   // JPEG pages are copied as they are
+    }
+
+    func testExportShortensATitleTooLongForTheFileName() throws {
+        let long = dir.appendingPathComponent(String(repeating: "a", count: 240) + ".cbz")   // a valid name
+        try FileManager.default.copyItem(at: comic, to: long)
+        ReadingProgress.setPanelOverride(long, page: 2, panels: [left])
+        let out = dir.appendingPathComponent("export")
+        let result = try TrainingExport.export(ReadingProgress.allPanelOverrides(), comics: [ReadingProgress.key(long): long], to: out)
+        XCTAssertEqual(result.pages, 1)
+        let name = "chika_" + String(repeating: "a", count: 200) + "_p003"   // no clash, so no id
+        XCTAssertTrue(FileManager.default.fileExists(atPath: out.appendingPathComponent("images/train/\(name).jpg").path))
+    }
+
+    func testExportReencodesAPngPageAsJpeg() throws {
+        let png = try XCTUnwrap(NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 8, pixelsHigh: 8, bitsPerSample: 8,
+                                                 samplesPerPixel: 3, hasAlpha: false, isPlanar: false, colorSpaceName: .deviceRGB,
+                                                 bytesPerRow: 0, bitsPerPixel: 0)?.representation(using: .png, properties: [:]))
+        let url = dir.appendingPathComponent("Png.cbz")
+        try Archive(url: url, accessMode: .create).addEntry(with: "001.png", type: .file, uncompressedSize: Int64(png.count)) {
+            png.subdata(in: Int($0)..<Int($0) + $1)
+        }
+        ReadingProgress.setPanelOverride(url, page: 0, panels: [left])
+        let out = dir.appendingPathComponent("export")
+        let result = try TrainingExport.export(ReadingProgress.allPanelOverrides(), comics: [ReadingProgress.key(url): url], to: out)
+        XCTAssertEqual(result.pages, 1)
+        XCTAssertTrue(try Data(contentsOf: out.appendingPathComponent("images/train/chika_Png_p001.jpg")).starts(with: [0xFF, 0xD8, 0xFF]))
     }
 
     // An edited page skips detection, keeps its stored order when the direction flips, and saves in place.

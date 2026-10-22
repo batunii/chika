@@ -1,3 +1,5 @@
+import Foundation
+
 /// A detected panel as a rectangle in normalized page coordinates: each edge is a fraction in
 /// `[0, 1]` of the page width/height. Normalized coordinates make panels independent of the
 /// resolution the page happened to be decoded/detected at, so the reader can map them onto a bitmap
@@ -33,5 +35,14 @@ public struct Panel: Equatable, Hashable, Codable, Sendable {
         let x1 = min(max((right * w).rounded(.up), x0 + 1), w)
         let y1 = min(max((bottom * h).rounded(.up), y0 + 1), h)
         return (Int(x0), Int(y0), Int(x1 - x0), Int(y1 - y0))
+    }
+
+    /// This panel as one line of a YOLO label file, "0 cx cy w h" (class 0 = panel, normalized, 6
+    /// decimals) like training/scripts writes. Clamped to the page; nil if nothing of it is left.
+    public var yoloLabel: String? {
+        let l = min(max(left, 0), 1), t = min(max(top, 0), 1), r = min(max(right, 0), 1), b = min(max(bottom, 0), 1)
+        guard r > l, b > t else { return nil }
+        return String(format: "%d %.6f %.6f %.6f %.6f", YoloPanelDecoder.panelClass,
+                      Double(l + r) / 2, Double(t + b) / 2, Double(r - l), Double(b - t))
     }
 }

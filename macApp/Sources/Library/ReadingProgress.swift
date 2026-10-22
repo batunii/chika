@@ -141,6 +141,17 @@ enum ReadingProgress {
         run("DELETE FROM panel_overrides WHERE id = ? AND page = ?", [key(url), page])
     }
 
+    /// Every saved override (comic key, page, panels), grouped by comic and in page order, for the training export.
+    static func allPanelOverrides() -> [(id: String, page: Int, panels: [Panel])] {
+        var rows: [(id: String, page: Int, panels: [Panel])] = []
+        run("SELECT id, page, panels FROM panel_overrides ORDER BY id, page") { row in
+            guard let json = sqlite3_column_text(row, 2).map({ String(cString: $0) }),
+                  let panels = try? JSONDecoder().decode([Panel].self, from: Data(json.utf8)) else { return }
+            rows.append((String(cString: sqlite3_column_text(row, 0)), Int(sqlite3_column_int64(row, 1)), panels))
+        }
+        return rows
+    }
+
     // MARK: - Migration
 
     /// One-time copy of the old filename-keyed UserDefaults JSON into the table, for the files in

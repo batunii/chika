@@ -100,6 +100,43 @@ page whole. Edits are kept per page in the progress database and go when the com
 the library. A bookmark or resume point on that page keeps its panel number, so after an edit it can
 land on a different panel.
 
+## Training export
+
+File > Export Panel Corrections… turns every page fixed in the panel editor into training data for
+the panel detector, so the model can learn from the reader's corrections. Pick (or create) a folder;
+Chika writes each corrected page of a comic that is still in the library as
+`images/train/chika_<title>_p<page>.jpg` (the archive's own bytes when the page is a JPEG, else
+re-encoded) and its boxes as `labels/train/chika_<title>_p<page>.txt`, one `0 cx cy w h` line per
+panel (class 0 = panel, normalized, 6 decimals), the layout `training/scripts` writes. The page
+number is 1-based and three digits, and the title has anything but letters, digits and `-` replaced
+by `_`. Comics whose titles would give the same name (ignoring case) also get 8 hex digits from the
+comic's identity, `chika_<title>_<id>_p<page>`. A page saved with no boxes goes out as one page-sized
+panel, the way the reader shows it. The closing alert counts edits skipped because their comic is no
+longer in the library, and pages that could not be read (the comic will not open, or has shrunk).
+
+Known limit: every saved box is labelled a panel, but the editor starts from the reader's zoom
+regions, not from panels. A box you leave unchanged is padded (5.7% of a panel's size on each side)
+and may cover two merged neighbours; after retraining on such boxes the reader pads the detector's
+already loose boxes again and merges panels more often. Some boxes are only pieces of one panel: the
+planner splits a full-width panel into 2, a broad panel or a whole page into 4 and a spread into up to
+8, the gap filler adds boxes for uncovered strips, and Split across/down halves a box. Each piece is
+exported as a panel of its own and teaches the detector to split real panels. Before exporting, redraw
+every box on a corrected page to a tight panel and join split pieces back into one.
+
+Like the COMICS pages, these carry panel labels only, no text (class 1) boxes. To fold them into
+the training set, copy both folders into the dataset from the repo's `training` folder (the `chika_`
+prefix keeps them apart from the `comics_` and `m109_` pages), then train as usual:
+
+```sh
+cd training
+cp -R <export>/images/train/. dataset/images/train/
+cp -R <export>/labels/train/. dataset/labels/train/
+```
+
+Each export writes every corrected page again over the same names; export into a new folder rather
+than over an old one, so a page you have since reset to detection, or a comic whose name changed,
+leaves no stale files behind.
+
 ## Peek auto-advance
 
 The peek window (⇧⌘P) can read by itself: the play button in its hover bar, or P while it is
