@@ -16,6 +16,16 @@ struct ReaderSlotsTests {
         #expect(s.step == 5 && s.camera == six[5]) // last panel, not panel 2
     }
 
+    @Test func replacedRegionsKeepTheWholePageAfterTheLastPanel() {
+        // The panel editor adding panels while the reader shows the outro: still the outro, not a new panel.
+        var s = ReaderSlots(page: 0, step: 3, regions: Array(six.prefix(3)))
+        s.setRegions(six)
+        #expect(s.step == 6 && s.camera == .fullPage)
+        var onPanel = ReaderSlots(page: 0, step: 1, regions: Array(six.prefix(3)))
+        onPanel.setRegions(six)
+        #expect(onPanel.step == 1 && onPanel.camera == six[1])
+    }
+
     @Test func forwardFromIntroWithUnknownRegionsIsBlocked() {
         // Fast taps must wait for detection instead of skipping an undetected page.
         var s = ReaderSlots(page: 0, step: -1)

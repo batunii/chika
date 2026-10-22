@@ -66,5 +66,15 @@ final class PanelOverrideTests: XCTestCase {
         XCTAssertEqual(ReadingProgress.panelOverride(comic, page: 0), [right])
         XCTAssertTrue(model.savePanels([], page: 0))   // nothing left: the page reads whole
         XCTAssertEqual(model.slots.regions, [.fullPage])
+
+        // Reset forgets the edit and detects the page again (the detector needs the page's image).
+        while model.image == nil, Date.now < deadline { try await Task.sleep(for: .milliseconds(20)) }
+        model.resetPanels(page: 0)
+        XCTAssertFalse(model.pageEdited)
+        XCTAssertNil(ReadingProgress.panelOverride(comic, page: 0))
+        XCTAssertTrue(model.detecting)
+        let landed = Date.now + 20   // wait for it, so it cannot land during a later test
+        while model.detecting, Date.now < landed { try await Task.sleep(for: .milliseconds(20)) }
+        XCTAssertFalse(model.detecting)
     }
 }

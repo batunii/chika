@@ -27,7 +27,9 @@ struct PanelEditor: View {
         self.onClose = onClose
         _page = State(initialValue: model.slots.page)
         _image = State(initialValue: model.image)
-        _panels = State(initialValue: model.slots.regions ?? [])
+        let regions = model.slots.regions ?? []
+        // [.fullPage] means "no panels" (detection found none, or saved empty): as a box it would catch every click and drag.
+        _panels = State(initialValue: regions == [.fullPage] ? [] : regions)
     }
 
     private var single: Int? { selection.count == 1 ? selection.first : nil }

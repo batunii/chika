@@ -23,8 +23,10 @@ public struct ReaderSlots: Equatable, Sendable {
 
     public enum Move: Equatable, Sendable { case moved, blocked, nextPage, previousPage }
 
-    /// Detection landed.
+    /// Detection landed, or (regions already known) re-detection or the panel editor replaced them.
     public mutating func setRegions(_ r: [Panel]) {
+        // On a known page's closing whole page, stay there: a panel added by an edit must not take the camera.
+        if let regions, step >= regions.count { step = Self.outroSentinel }
         regions = r
         step = min(step, r.count) // resolves outroSentinel and any stray step past the outro
     }
