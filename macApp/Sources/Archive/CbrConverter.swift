@@ -21,8 +21,12 @@ enum CbrConverter {
         try fm.createDirectory(at: staging, withIntermediateDirectories: true)
         defer { try? fm.removeItem(at: staging) }
 
-        let entries = try CbrReader.extract(at: source, into: staging, keep: isImageEntry)
+        var entries = try CbrReader.extract(at: source, into: staging) { isImageEntry($0) || ComicInfo.isEntry($0) }
             .sorted { NaturalOrder.isOrderedBefore($0.name, $1.name) }
+        // Carry ComicInfo.xml over (at the root, where readers look) so series metadata survives.
+        if let info = entries.firstIndex(where: { ComicInfo.isEntry($0.name) }) {
+            try fm.moveItem(at: entries.remove(at: info).file, to: staging.appendingPathComponent("ComicInfo.xml"))
+        }
         guard !entries.isEmpty else { throw ConversionError.noImages }
 
         // Rename in place to zero-padded, order-preserving names (extracted files are bare indices,

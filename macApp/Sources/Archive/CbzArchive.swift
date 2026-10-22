@@ -18,6 +18,14 @@ final class CbzArchive {
 
     var pageCount: Int { entries.count }
 
+    /// The archive's ComicInfo.xml, if it has a readable one.
+    var comicInfo: ComicInfo? {
+        guard let entry = archive.first(where: { $0.type == .file && ComicInfo.isEntry($0.path) }) else { return nil }
+        var data = Data()
+        guard (try? archive.extract(entry, skipCRC32: true) { data.append($0) }) != nil else { return nil }
+        return ComicInfo.parse(data)
+    }
+
     func readPage(_ index: Int) throws -> Data {
         var data = Data()
         _ = try archive.extract(entries[index], skipCRC32: true) { data.append($0) }

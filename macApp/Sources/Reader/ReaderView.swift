@@ -20,6 +20,7 @@ struct ReaderView: View {
 private struct ReaderContent: View {
     @ObservedObject var model: ReaderModel
     @EnvironmentObject private var settings: ChikaSettings
+    @EnvironmentObject private var library: LibraryStore
     @Environment(\.dismiss) private var dismiss
     @Environment(\.openWindow) private var openWindow
     // Manual zoom/pan layered on top of the panel-framing camera (pinch to zoom, drag to pan).
@@ -211,7 +212,23 @@ private struct ReaderContent: View {
     private var bottomBar: some View {
         VStack(spacing: 0) {
             HStack {
-                Text("ARROW KEYS TO READ").font(.anton(12)).tracking(2).foregroundColor(Chika.creamMuted)
+                // On the last page, the next issue of the series (ComicInfo.xml) replaces the hint.
+                if model.slots.page == model.pageCount - 1, let next = library.nextIssue(after: model.comicURL) {
+                    Button {
+                        openWindow(id: "reader", value: next)
+                        dismiss()
+                    } label: {
+                        Label("NEXT ISSUE: \(next.deletingPathExtension().lastPathComponent.uppercased())", systemImage: "arrow.right")
+                            .font(.anton(12)).tracking(1).foregroundColor(Chika.cream)
+                            .padding(.horizontal, 12).padding(.vertical, 6)
+                            .background(Chika.crimson).clipShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .keyboardShortcut(.return, modifiers: [])
+                    .help("Open the next issue (Return)")
+                } else {
+                    Text("ARROW KEYS TO READ").font(.anton(12)).tracking(2).foregroundColor(Chika.creamMuted)
+                }
                 Spacer()
                 PageCoin(page: (scrubbing ? Int(scrub.rounded()) : model.slots.page) + 1, total: model.pageCount)
             }

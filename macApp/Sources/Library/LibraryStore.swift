@@ -15,8 +15,13 @@ final class LibraryStore: ObservableObject {
     @Published private(set) var comics: [URL] = []
     @Published var importing = false
     @Published var importError: String?
+    /// ComicInfo.xml metadata of the comics that have it, filled in the background after a scan.
+    @Published private(set) var info: [URL: ComicInfo] = [:]
     /// For comics read in place: the bookmarked file or watched folder each one came from.
     private(set) var sources: [URL: URL] = [:]
+    private var infoRead: Set<URL> = []
+    /// The latest metadata read, so tests can await it.
+    private(set) var infoTask: Task<Void, Never>?
 
     private let dir: URL
     private let defaults: UserDefaults
@@ -85,6 +90,7 @@ final class LibraryStore: ObservableObject {
                 return $0.0.lastPathComponent.localizedStandardCompare($1.0.lastPathComponent) == .orderedAscending
             }
             .map(\.0)
+        readInfo()
     }
 
     /// Imports off the main thread. The returned task lets tests await completion; the UI ignores it.
@@ -119,6 +125,44 @@ final class LibraryStore: ObservableObject {
         }
         CoverLoader.evict(url)
         refresh()
+    }
+
+    // MARK: - Series
+
+    /// Reads ComicInfo.xml once per comic, off the main thread.
+    // shortcut: keyed by URL, so editing a comic's ComicInfo.xml shows after a relaunch; key by
+    // modification date if anyone edits metadata while Chika runs.
+    private func readInfo() {
+        let pending = comics.filter { !infoRead.contains($0) }
+        guard !pending.isEmpty else { return }
+        infoRead.formUnion(pending)
+        infoTask = Task {
+            let found = await Task.detached(priority: .utility) {
+                pending.reduce(into: [URL: ComicInfo]()) { map, url in map[url] = (try? ComicOpener.open(url))?.comicInfo }
+            }.value
+            info.merge(found) { $1 }
+        }
+    }
+
+    /// The next issue of `url`'s series in the library, by ComicInfo volume and number.
+    func nextIssue(after url: URL) -> URL? {
+        guard let current = info[url] else { return nil }
+        let candidates = comics.filter { $0 != url && info[$0] != nil }
+        return ComicInfo.next(after: current, in: candidates.map { info[$0]! }).map { candidates[$0] }
+    }
+
+    /// Comics grouped by series (alphabetical, issues in order), then the comics with no series
+    /// under a nil title, in their incoming order.
+    static func seriesGroups(_ comics: [URL], info: [URL: ComicInfo]) -> [(series: String?, comics: [URL])] {
+        var groups: [String: [URL]] = [:]
+        var loose: [URL] = []
+        for url in comics {
+            if let series = info[url]?.series { groups[series.lowercased(), default: []].append(url) } else { loose.append(url) }
+        }
+        let series = groups.values
+            .map { urls in (series: info[urls[0]]?.series, comics: urls.sorted { ComicInfo.issueOrder(info[$0]!, info[$1]!) }) }
+            .sorted { $0.series!.localizedStandardCompare($1.series!) == .orderedAscending }
+        return loose.isEmpty ? series : series + [(nil, loose)]
     }
 
     // MARK: - Read in place

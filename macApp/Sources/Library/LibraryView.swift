@@ -1,4 +1,5 @@
 import SwiftUI
+import ChikaCore
 
 /// The Chika library: pulp-comic identity matching the Android design (ink ground with a halftone
 /// wash, the three-panel mark + CHI·KA wordmark) over a grid of comic cards. Each comic opens in its
@@ -189,19 +190,29 @@ struct LibraryView: View {
                     Text("\(library.comics.count) \(library.comics.count == 1 ? "comic" : "comics")")
                         .font(.archivo(13)).foregroundColor(Chika.creamMuted)
                 }
-                LazyVGrid(columns: columns, alignment: .leading, spacing: 28) {
-                    ForEach(library.comics, id: \.self) { url in
-                        Button { openWindow(id: "reader", value: url) } label: {
-                            ComicCard(url: url, progress: progress[ReadingProgress.key(url)])
-                        }
-                        .buttonStyle(.plain)
-                        .contextMenu {
-                            Button(role: .destructive) { pendingDelete = url } label: {
-                                Label(removalLabel(url), systemImage: "trash")
+                let groups = LibraryStore.seriesGroups(library.comics, info: library.info)
+                ForEach(groups, id: \.series) { group in
+                    // Section titles only once there is a series to tell apart.
+                    if groups.count > 1 || group.series != nil {
+                        Text((group.series ?? "Other comics").uppercased())
+                            .font(.anton(18)).foregroundColor(Chika.cream).padding(.top, 8)
+                    }
+                    LazyVGrid(columns: columns, alignment: .leading, spacing: 28) {
+                        ForEach(group.comics, id: \.self) { url in
+                            Button { openWindow(id: "reader", value: url) } label: {
+                                ComicCard(url: url, progress: progress[ReadingProgress.key(url)], info: library.info[url])
+                            }
+                            .buttonStyle(.plain)
+                            .contextMenu {
+                                Button(role: .destructive) { pendingDelete = url } label: {
+                                    Label(removalLabel(url), systemImage: "trash")
+                                }
                             }
                         }
+                        if group.series == groups.last?.series {
+                            AddTile(importing: library.importing) { pickMode = .importCopies; showPicker = true }
+                        }
                     }
-                    AddTile(importing: library.importing) { pickMode = .importCopies; showPicker = true }
                 }
             }
             .padding(28)
@@ -217,6 +228,7 @@ struct LibraryView: View {
 struct ComicCard: View {
     let url: URL
     let progress: Progress?
+    var info: ComicInfo?
     @State private var cover: NSImage?
     @State private var pages = 0
 
@@ -224,6 +236,11 @@ struct ComicCard: View {
     private var lastPage: Int { progress?.page ?? 0 }
     private var pageCount: Int { progress?.total ?? pages }
     private var started: Bool { lastPage > 0 }
+    // "Vol. 2 · #3 · Writer" from ComicInfo.xml, when it has any of them.
+    private var issueLine: String? {
+        let parts = [info?.volume.map { "Vol. \($0)" }, info?.number.map { "#\($0)" }, info?.writer].compactMap { $0 }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
     // Android's fill formula: (lastPage + 1) / pageCount; page 0 already counts as "on page 1".
     private var pct: Double { pageCount > 0 ? min(max(Double(lastPage + 1) / Double(pageCount), 0), 1) : 0 }
 
@@ -260,6 +277,12 @@ struct ComicCard: View {
                 .lineLimit(2).multilineTextAlignment(.leading)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.top, 9)
+            if let issue = issueLine {
+                Text(issue)
+                    .font(.archivo(12)).foregroundColor(Chika.ochre).lineLimit(1)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.top, 2)
+            }
             Text(started
                  ? "\(Int(pct * 100))% · pg \(lastPage + 1)/\(pageCount)"
                  : "\(pageCount) pages")

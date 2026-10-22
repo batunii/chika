@@ -1,4 +1,5 @@
 import XCTest
+import ZIPFoundation
 @testable import Chika
 
 @MainActor
@@ -87,5 +88,30 @@ final class LibraryStoreTests: XCTestCase {
         store.delete(try XCTUnwrap(store.comics.first))
         XCTAssertTrue(store.comics.isEmpty)
         XCTAssertTrue(FileManager.default.fileExists(atPath: first.path))
+    }
+
+    func testComicInfoGroupsSeriesAndFindsTheNextIssue() async throws {
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        func make(_ name: String, number: String?) throws -> URL {
+            let url = dir.appendingPathComponent("\(name).cbz")
+            try FileManager.default.copyItem(at: comic, to: url)
+            guard let number else { return url }
+            let xml = Data("<ComicInfo><Series>Saga</Series><Number>\(number)</Number></ComicInfo>".utf8)
+            try Archive(url: url, accessMode: .update).addEntry(with: "ComicInfo.xml", type: .file, uncompressedSize: Int64(xml.count)) {
+                xml.subdata(in: Int($0)..<Int($0) + $1)
+            }
+            return url
+        }
+        let ten = try make("b", number: "10"), two = try make("a", number: "2"), loose = try make("c", number: nil)
+
+        let store = LibraryStore(directory: dir, defaults: ReadingProgress.defaults)
+        await store.infoTask?.value
+
+        let groups = LibraryStore.seriesGroups(store.comics, info: store.info)
+        XCTAssertEqual(groups.map(\.series), ["Saga", nil])
+        XCTAssertEqual(groups.map(\.comics), [[two, ten], [loose]])
+        XCTAssertEqual(store.nextIssue(after: two), ten)
+        XCTAssertNil(store.nextIssue(after: ten))
+        XCTAssertNil(store.nextIssue(after: loose))
     }
 }
