@@ -197,6 +197,12 @@ final class LibraryStore: ObservableObject {
 
     // MARK: - Read in place
 
+    /// A dropped or opened folder is watched in place; a file is imported as a copy.
+    func add(_ url: URL) {
+        let isFolder = (try? url.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory ?? false
+        if isFolder { addInPlace(url) } else { importComic(from: url) }
+    }
+
     /// Adds a comic file or a folder to watch without copying it. Picked and dropped URLs carry a
     /// sandbox extension; the bookmark keeps that access across launches.
     func addInPlace(_ url: URL) {

@@ -23,7 +23,8 @@ struct LibraryView: View {
     @AppStorage("chika.library.sort") private var sort = LibraryStore.Sort.recent
     @AppStorage("chika.library.unreadOnly") private var unreadOnly = false
 
-    private let columns = [GridItem(.adaptive(minimum: 170, maximum: 220), spacing: 24)]
+    // Top-aligned so covers line up when titles and issue lines differ in height.
+    private let columns = [GridItem(.adaptive(minimum: 170, maximum: 220), spacing: 24, alignment: .top)]
 
     var body: some View {
         ZStack {
@@ -44,10 +45,7 @@ struct LibraryView: View {
         .onDrop(of: [.fileURL], isTargeted: nil) { providers in
             for provider in providers {
                 _ = provider.loadObject(ofClass: URL.self) { url, _ in
-                    guard let url else { return }
-                    // A dropped folder is watched in place; dropped files are imported as copies.
-                    let isFolder = (try? url.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory ?? false
-                    Task { @MainActor in if isFolder { library.addInPlace(url) } else { library.importComic(from: url) } }
+                    if let url { Task { @MainActor in library.add(url) } }
                 }
             }
             return true
@@ -90,20 +88,21 @@ struct LibraryView: View {
             progress = ReadingProgress.all()
             opened = ReadingProgress.openedMap()
         }
-        .onOpenURL { url in library.importComic(from: url) }
+        .onOpenURL { url in library.add(url) }
     }
 
     private var libraryControls: some View {
         HStack(spacing: 10) {
             TextField("Search title, series, writer", text: $query)
                 .textFieldStyle(.roundedBorder)
-                .frame(width: 220)
+                .frame(width: 200)
             Picker("Sort", selection: $sort) {
                 ForEach(LibraryStore.Sort.allCases, id: \.self) { Text($0.rawValue).tag($0) }
             }
             .fixedSize()
             Toggle("Unread only", isOn: $unreadOnly)
                 .toggleStyle(.button)
+                .fixedSize()
                 .help("Hide comics read to the last page")
         }
         .font(.archivo(13))

@@ -37,7 +37,7 @@ sandboxed; this is the same folder and bundle id the Catalyst app used, so its l
 
 - **Imported copies** (⌘O, or files dropped on the window) go to the Comics folder above. CBZ,
   CBR, CB7 and PDF are accepted: CBR and CB7 are converted to CBZ on import, PDFs are kept as they are.
-- **Read in place** (⇧⌘O, or a folder dropped on the window): single comics or whole folders stay
+- **Read in place** (⇧⌘O, or a folder dropped on the window or opened with Chika): single comics or whole folders stay
   where they are. Chika keeps a security-scoped bookmark for each (entitlement
   `com.apple.security.files.bookmarks.app-scope`) and watches folders with FSEvents, so new CBZ/CBR
   files appear by themselves
