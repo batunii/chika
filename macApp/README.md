@@ -211,6 +211,11 @@ pieces (frosted material before macOS 26): minimize on the left, previous/next p
 seconds per panel and window opacity in the middle (the last two hide when the window is narrow),
 and back to the full reader on the right.
 
+Dropped within about 48 pt of a corner of its screen, the peek snaps into that corner, 16 pt in from
+the edges, and stays in it as the panel's shape changes its height. It opens where it was last left
+on that screen (in the same corner, else at the same top-left); if that screen is gone or the spot is
+off it now, it opens centred. The size is not remembered: it always opens 420 pt wide.
+
 ## Peek auto-advance
 
 The peek window (⇧⌘P) can read by itself: the play button in its hover bar, or P while it is

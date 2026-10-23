@@ -193,7 +193,7 @@ private extension View {
 
 /// Reaches the peek's NSWindow: follows you across Spaces and over full-screen apps, stays up when
 /// Chika is in the background, drags by its content, keeps the current panel's aspect while
-/// resizing, and fades with the opacity slider.
+/// resizing, fades with the opacity slider, and opens where it was last left (PeekPlacement).
 private struct PeekWindowConfigurator: NSViewRepresentable {
     let aspect: CGSize
     let opacity: Double
@@ -201,7 +201,12 @@ private struct PeekWindowConfigurator: NSViewRepresentable {
 
     func makeNSView(context: Context) -> NSView { NSView() }
 
+    func makeCoordinator() -> PeekPlacement { PeekPlacement() }
+
+    static func dismantleNSView(_ view: NSView, coordinator: PeekPlacement) { coordinator.stop() }
+
     func updateNSView(_ view: NSView, context: Context) {
+        let placement = context.coordinator
         // The view joins its window after this first update, so look it up on the next turn.
         DispatchQueue.main.async {
             guard let window = view.window else { return }
@@ -219,18 +224,84 @@ private struct PeekWindowConfigurator: NSViewRepresentable {
                     window.standardWindowButton(button)?.isHidden = true
                 }
                 window.hasShadow = true
-                // Start small and centred whatever size the window system first gave it.
+                // Start small whatever size the window system first gave it, where it was last left (else centred).
                 window.setContentSize(CGSize(width: 420, height: 420 * aspect.height / aspect.width))
-                window.center()
+                if !placement.restore(window) { window.center() }
+                placement.watch(window)
                 self.window = window
             }
             if window.aspectRatio != aspect {
-                // A new panel shape: resize to it, keeping the current width.
+                // A new panel shape: resize to it, keeping the current width, and a window in a corner
+                // in that corner (the resize alone keeps the bottom-left).
                 window.aspectRatio = aspect
+                let area = window.screen?.visibleFrame
+                let corner = area.flatMap { WindowSnap.corner(near: window.frame, in: $0, reach: 1) }
                 let w = window.frame.width
                 window.setContentSize(CGSize(width: w, height: w * aspect.height / aspect.width))
+                if let area, let corner { window.setFrameOrigin(WindowSnap.origin(corner, size: window.frame.size, in: area)) }
             }
             window.alphaValue = opacity
         }
+    }
+}
+
+/// The peek's place on screen: dropped near a corner of its screen it snaps into it, and where it
+/// settles is saved with that screen, so the next peek opens there (centred if that screen is gone).
+@MainActor
+private final class PeekPlacement {
+    private static let frameKey = "chika.peek.frame", screenKey = "chika.peek.screen"
+    private var observer: NSObjectProtocol?
+    private var settling = false
+
+    /// Puts the window where it was last left; false if there is no such place on a screen now.
+    func restore(_ window: NSWindow) -> Bool {
+        let defaults = UserDefaults.standard
+        guard let saved = defaults.string(forKey: Self.frameKey).map(NSRectFromString),
+              let id = defaults.string(forKey: Self.screenKey),
+              let screen = NSScreen.screens.first(where: { $0.uuid == id }),
+              let origin = WindowSnap.restore(saved, size: window.frame.size, in: screen.visibleFrame) else { return false }
+        window.setFrameOrigin(origin)
+        return true
+    }
+
+    func watch(_ window: NSWindow) {
+        observer = NotificationCenter.default.addObserver(forName: NSWindow.didMoveNotification, object: window,
+                                                          queue: .main) { [weak self, weak window] _ in
+            MainActor.assumeIsolated { if let window { self?.settle(window) } }
+        }
+    }
+
+    func stop() {
+        if let observer { NotificationCenter.default.removeObserver(observer) }
+        observer = nil
+    }
+
+    /// The window moved: once the mouse button is up (a drag may report its moves before the drop),
+    /// snap it into a corner it is near and save where it is.
+    private func settle(_ window: NSWindow) {
+        guard !settling else { return }
+        settling = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self, weak window] in
+            guard let self, let window else { return }
+            settling = false
+            if NSEvent.pressedMouseButtons & 1 != 0 { settle(window); return }
+            guard let screen = window.screen else { return }
+            var frame = window.frame
+            if let corner = WindowSnap.corner(near: frame, in: screen.visibleFrame) {
+                frame.origin = WindowSnap.origin(corner, size: frame.size, in: screen.visibleFrame)
+                if frame != window.frame { window.setFrame(frame, display: true, animate: true) }
+            }
+            UserDefaults.standard.set(NSStringFromRect(frame), forKey: Self.frameKey)
+            UserDefaults.standard.set(screen.uuid, forKey: Self.screenKey)
+        }
+    }
+}
+
+private extension NSScreen {
+    /// The display's UUID: unlike its display number it survives reboots and replugging.
+    var uuid: String? {
+        guard let id = deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID,
+              let uuid = CGDisplayCreateUUIDFromDisplayID(id)?.takeRetainedValue() else { return nil }
+        return CFUUIDCreateString(nil, uuid) as String
     }
 }
