@@ -23,6 +23,14 @@ struct PanelEditingTests {
         #expect(PanelEditing.moved(.fullPage, dx: 0.3, dy: -0.3) == .fullPage)
     }
 
+    @Test func resizingMovesEverySideAndKeepsThePageAndTheSmallestSide() {
+        let grown = PanelEditing.resized(Panel(0.2, 0.3, 0.6, 0.5), by: 0.1)
+        near(0.1, grown.left, 1e-5); near(0.2, grown.top, 1e-5); near(0.7, grown.right, 1e-5); near(0.6, grown.bottom, 1e-5)
+        #expect(PanelEditing.resized(a, by: 0.1) == Panel(0, 0, 0.6, 0.6))   // stopped at the page's edges
+        let shrunk = PanelEditing.resized(Panel(0.5, 0.2, 0.53, 0.6), by: -0.02)
+        near(0.02, shrunk.width, 1e-5); near(0.36, shrunk.height, 1e-5); near(0.515, shrunk.centerX, 1e-5)
+    }
+
     @Test func mergeIsTheBoundingBoxAtTheEarliestIndex() {
         #expect(PanelEditing.merged([a, c, b], [2, 0]) == [Panel(0, 0, 1, 0.5), c])
         #expect(PanelEditing.merged([a, b, c], [1]) == [a, b, c])        // one panel: nothing to merge

@@ -112,9 +112,9 @@ struct ChikaCommands: Commands {
                 Button("Peek") { reader?.peek() }
                     .keyboardShortcut("p", modifiers: [.command, .shift])
                 Divider()
+                // Always on: from another mode it switches to Panels, and while panels load it says so.
                 Button("Edit Panels") { reader?.editPanels() }
                     .keyboardShortcut("e")
-                    .disabled(reader?.model.canEditPanels != true)
                 Button("Export Panel…") { reader?.exportPanel() }
                     .keyboardShortcut("e", modifiers: [.command, .shift])
             }

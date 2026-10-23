@@ -402,10 +402,14 @@ final class ReaderModel: ObservableObject {
     }
 
     /// Drops [page]'s hand-drawn panels and detects them again.
-    func resetPanels(page: Int) {
-        guard overrides.removeValue(forKey: page) != nil else { return }   // not edited: detection already shows
-        ReadingProgress.deletePanelOverride(comicURL, page: page)
+    /// False if the database delete failed: the edit stays, as it would come back on reopening.
+    @discardableResult
+    func resetPanels(page: Int) -> Bool {
+        guard overrides[page] != nil else { return true }   // not edited: detection already shows
+        guard ReadingProgress.deletePanelOverride(comicURL, page: page) else { return false }
+        overrides[page] = nil
         if page == slots.page { redetect() }
+        return true
     }
 }
 

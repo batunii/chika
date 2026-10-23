@@ -25,6 +25,17 @@ struct PanelEditor: View {
     // boxes were drawn; store a flag per box if people correct pages over several sittings.
     @State private var drawn: Set<Panel>
     @State private var saveFailed = false
+    @State private var resetFailed = false
+    @State private var confirmReset = false
+    @State private var confirmDiscard = false
+    // Captured like `page`: whether that page has saved edits for Reset to forget.
+    @State private var edited: Bool
+    // Each holds the boxes as they were before one change; the first undo is the page as the editor opened it.
+    @State private var undos: [Snapshot] = []
+    @State private var redos: [Snapshot] = []
+    @FocusState private var focused: Bool
+
+    private struct Snapshot { var panels: [Panel], selection: Set<Int>, drawn: Set<Panel> }
 
     private enum Drag { case draw(x: Float, y: Float), move(Int, from: Panel), resize(Int, anchorX: Float, anchorY: Float), reorder(Int) }
 
@@ -38,9 +49,11 @@ struct PanelEditor: View {
         let panels = regions == [.fullPage] ? [] : regions
         _panels = State(initialValue: panels)
         _drawn = State(initialValue: model.pageEdited && ReadingProgress.panelsDrawn(model.comicURL, page: model.slots.page) ? Set(panels) : [])
+        _edited = State(initialValue: model.pageEdited)
     }
 
     private var single: Int? { selection.count == 1 ? selection.first : nil }
+    private var changed: Bool { panels != (undos.first?.panels ?? panels) }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -54,6 +67,42 @@ struct PanelEditor: View {
         } message: {
             Text("Your edits are still open. Try Save again, or Cancel to leave the page as it was.")
         }
+        .alert("Could not reset the panels", isPresented: $resetFailed) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text("The page keeps its edited panels. Try Reset again, or Cancel to leave the page as it was.")
+        }
+        .confirmationDialog("Forget this page's edited panels?", isPresented: $confirmReset, titleVisibility: .visible) {
+            Button("Forget and Detect Again", role: .destructive) {
+                if model.resetPanels(page: page) { onClose() } else { resetFailed = true }
+            }
+        } message: {
+            Text("Chika detects the page's panels again, and it leaves the training export. This cannot be undone.")
+        }
+        .confirmationDialog("Discard changes?", isPresented: $confirmDiscard, titleVisibility: .visible) {
+            Button("Discard", role: .destructive) { onClose() }
+            Button("Keep Editing", role: .cancel) {}
+        } message: {
+            Text("The changes to this page's panels are not saved.")
+        }
+        .background {
+            // Off the crowded toolbar: Redo and Select All (to merge or delete an over-split page at once).
+            Button("Redo") { redo() }
+                .keyboardShortcut("z", modifiers: [.command, .shift])
+                .disabled(redos.isEmpty || drag != nil)
+                .opacity(0)
+                .accessibilityHidden(true)
+            Button("Select All") { selection = Set(panels.indices) }
+                .keyboardShortcut("a", modifiers: .command)
+                .opacity(0)
+                .accessibilityHidden(true)
+        }
+        // Its own key focus, so Delete reaches it whatever was pressed before.
+        .focusable()
+        .focusEffectDisabled()
+        .focused($focused)
+        .onAppear { focused = true }
+        .onKeyPress(keys: [.delete, .deleteForward]) { _ in deleteSelection(); return .handled }
     }
 
     private func canvas(_ image: CGImage, in area: CGSize) -> some View {
@@ -68,6 +117,7 @@ struct PanelEditor: View {
                 Rectangle().stroke(Chika.ochre, style: StrokeStyle(lineWidth: 2, dash: [6, 4]))
                     .frame(width: CGFloat(drawing.width) * size.width, height: CGFloat(drawing.height) * size.height)
                     .offset(x: CGFloat(drawing.left) * size.width, y: CGFloat(drawing.top) * size.height)
+                    .zIndex(2)
             }
         }
         .frame(width: size.width, height: size.height)
@@ -80,6 +130,7 @@ struct PanelEditor: View {
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Page \(page + 1)")
         .accessibilityAction(named: "Add panel") {
+            record()
             panels.append(Panel(left: 0.25, top: 0.25, right: 0.75, bottom: 0.75))
             selection = [panels.count - 1]
         }
@@ -90,11 +141,13 @@ struct PanelEditor: View {
         let p = panels[i], selected = selection.contains(i)
         let color = selected || dropTarget == i ? Chika.ochre : Chika.crimson
         let w = CGFloat(p.width) * size.width, h = CGFloat(p.height) * size.height
-        return Rectangle()
+        let percent = { (v: Float) in Int((v * 100).rounded()) }
+        let place = "\(percent(p.left))% from the left, \(percent(p.top))% from the top, \(percent(p.width))% wide, \(percent(p.height))% high"
+        let shape = Rectangle()
             .fill(color.opacity(selected ? 0.18 : 0.08))
             .overlay(Rectangle().strokeBorder(color, lineWidth: selected ? 3 : 2))
             .overlay(alignment: .topLeading) {
-                Text("\(i + 1)").font(.anton(15)).foregroundColor(Chika.cream)
+                Text("\(i + 1)").font(.anton(15)).foregroundColor(color == Chika.ochre ? Chika.ink : Chika.cream)
                     .padding(.horizontal, 7).padding(.vertical, 1)
                     .background(color).clipShape(Capsule()).padding(4)
             }
@@ -108,6 +161,7 @@ struct PanelEditor: View {
             }
             .frame(width: w, height: h)
             .offset(x: CGFloat(p.left) * size.width, y: CGFloat(p.top) * size.height)
+            .zIndex(selected ? 1 : 0)   // over its neighbours' borders, so its number and handles stay clear
             .help(selected ? "Panel \(i + 1): drag to move it, a corner to resize, or its number onto another box to reorder"
                            : "Panel \(i + 1): click to select, Shift-click to add, drag its number onto another box to reorder")
             .accessibilityElement()
@@ -115,6 +169,22 @@ struct PanelEditor: View {
             .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
             // Toggles, so a VoiceOver user can gather two or more panels for Merge.
             .accessibilityAction { selection.formSymmetricDifference([i]) }
+        // VoiceOver's way to move and resize, which are pointer drags otherwise: 2% of the page a step.
+        let d: Float = 0.02
+        return shape
+            .accessibilityValue(place)
+            .accessibilityAction(named: "Move left") { nudge(i) { PanelEditing.moved($0, dx: -d, dy: 0) } }
+            .accessibilityAction(named: "Move right") { nudge(i) { PanelEditing.moved($0, dx: d, dy: 0) } }
+            .accessibilityAction(named: "Move up") { nudge(i) { PanelEditing.moved($0, dx: 0, dy: -d) } }
+            .accessibilityAction(named: "Move down") { nudge(i) { PanelEditing.moved($0, dx: 0, dy: d) } }
+            .accessibilityAction(named: "Grow") { nudge(i) { PanelEditing.resized($0, by: d) } }
+            .accessibilityAction(named: "Shrink") { nudge(i) { PanelEditing.resized($0, by: -d) } }
+    }
+
+    private func nudge(_ i: Int, _ change: (Panel) -> Panel) {
+        guard panels.indices.contains(i), drag == nil else { return }
+        record()
+        replace(i, with: change(panels[i]))
     }
 
     // MARK: - Pointer
@@ -145,11 +215,16 @@ struct PanelEditor: View {
         switch drag {
         case nil: click(value.location, size)
         case .draw:
-            if let drawing { panels.append(drawing); drawn.insert(drawing); selection = [panels.count - 1] }
+            if let drawing { record(); panels.append(drawing); drawn.insert(drawing); selection = [panels.count - 1] }
         case .reorder(let i):
             // Takes the target's place in the reading order; the boxes between shift by one.
-            if let target = dropTarget { panels = PanelEditing.reordered(panels, moving: i, by: target - i); selection = [target] }
-        case .move, .resize: break
+            if let target = dropTarget {
+                record()
+                panels = PanelEditing.reordered(panels, moving: i, by: target - i)
+                selection = [target]
+            }
+        case .move, .resize:
+            if undos.last?.panels == panels { undos.removeLast() }   // recorded on grabbing, but nothing moved
         }
         drag = nil
         drawing = nil
@@ -165,19 +240,22 @@ struct PanelEditor: View {
             let p = panels[i]
             for (cx, ax) in [(p.left, p.right), (p.right, p.left)] {
                 for (cy, ay) in [(p.top, p.bottom), (p.bottom, p.top)] where abs(x - cx) <= reachX && abs(y - cy) <= reachY {
+                    record()
                     return .resize(i, anchorX: ax, anchorY: ay)
                 }
             }
         }
-        // The number badge: about 34 x 26 pt in the box's top-leading corner.
-        if let i = panels.indices.last(where: { i in   // last: drawn on top
+        // The number badge: about 34 x 26 pt in the box's top-leading corner. Topmost first, as drawn:
+        // selected boxes over the rest, later boxes over earlier ones.
+        let drawOrder = panels.indices.filter { !selection.contains($0) } + selection.sorted()
+        if let i = drawOrder.last(where: { i in
             let p = panels[i]
             return x >= p.left && y >= p.top && x <= p.left + Float(34 / size.width) && y <= p.top + Float(26 / size.height)
         }) {
             selection = [i]
             return .reorder(i)
         }
-        if let i = PanelEditing.hit(panels, x: x, y: y, among: selection) { return .move(i, from: panels[i]) }
+        if let i = PanelEditing.hit(panels, x: x, y: y, among: selection) { record(); return .move(i, from: panels[i]) }
         return .draw(x: x, y: y)
     }
 
@@ -197,14 +275,21 @@ struct PanelEditor: View {
         HStack(spacing: 4) {
             VStack(alignment: .leading, spacing: 2) {
                 Text("Edit panels").font(.archivo(14, weight: 800)).foregroundColor(Chika.cream).lineLimit(1)
-                Text("Page \(page + 1) · \(panels.count) panel\(panels.count == 1 ? "" : "s")")
+                Text("Page \(page + 1) · "
+                     + (panels.isEmpty ? "0 panels: the page is read whole" : "\(panels.count) panel\(panels.count == 1 ? "" : "s")")
+                     + (edited ? " · edited" : ""))
                     .font(.archivo(9)).tracking(1.4).foregroundColor(Chika.creamMuted).lineLimit(1)
+                Text("Drag to draw · Shift-click to add · Return saves")
+                    .font(.archivo(9)).foregroundColor(Chika.creamMuted).lineLimit(1)
             }
             Spacer()
+            tool("Undo", "arrow.uturn.backward", "Undo the last change (⌘Z)", enabled: !undos.isEmpty && drag == nil) { undo() }
+                .keyboardShortcut("z", modifiers: .command)
             tool("Earlier", "arrowshape.backward", "Read the selected panel earlier", enabled: (single ?? 0) > 0) { reorder(-1) }
             tool("Later", "arrowshape.forward", "Read the selected panel later",
                  enabled: single.map { $0 < panels.count - 1 } ?? false) { reorder(1) }
             tool("Merge", "arrow.triangle.merge", "Merge the selected panels into one", enabled: selection.count > 1) {
+                record()
                 panels = PanelEditing.merged(panels, selection)
                 selection = [selection.min()!]
             }
@@ -212,24 +297,20 @@ struct PanelEditor: View {
                  enabled: single != nil) { split(across: true) }
             tool("Split down", "rectangle.split.2x1", "Split the selected panel into side-by-side halves",
                  enabled: single != nil) { split(across: false) }
-            // Not mid-drag: the drag holds a panel index that deleting would make stale.
-            tool("Delete", "trash", "Delete the selected panels (Delete)", enabled: !selection.isEmpty && drag == nil) {
-                panels.remove(atOffsets: IndexSet(selection))
-                selection = []
-            }
-            .keyboardShortcut(.delete, modifiers: [])
+            tool("Delete", "trash", "Delete the selected panels (Delete)", enabled: !selection.isEmpty && drag == nil) { deleteSelection() }
+                .keyboardShortcut(.delete, modifiers: [])
             tool("Auto order", "list.number",
                  "Put the panels in reading order, \(model.rightToLeft ? "right to left" : "left to right")",
                  enabled: panels.count > 1) {
+                record()
                 panels = PanelOrdering.order(panels, rightToLeft: model.rightToLeft)
                 selection = []
             }
-            tool("Reset to detected", "arrow.counterclockwise", "Forget this page's edited panels and detect them again",
-                 enabled: true) {
-                model.resetPanels(page: page)
-                onClose()
-            }
-            Button { onClose() } label: { pill("Cancel", Chika.cream.opacity(0.12)) }
+            // Not the undo arrow it once was: this forgets saved edits for good, so it asks first.
+            tool("Reset to detected", "wand.and.stars",
+                 edited ? "Forget this page's saved panels and detect them again" : "Only a page with saved panels can be reset",
+                 enabled: edited && drag == nil) { confirmReset = true }
+            Button { if changed { confirmDiscard = true } else { onClose() } } label: { pill("Cancel", Chika.cream.opacity(0.12)) }
                 .keyboardShortcut(.escape, modifiers: [])
                 .help("Close without saving (Esc)")
                 .accessibilityLabel("Cancel")
@@ -262,15 +343,46 @@ struct PanelEditor: View {
 
     private func reorder(_ delta: Int) {
         guard let i = single else { return }
+        record()
         panels = PanelEditing.reordered(panels, moving: i, by: delta)
         selection = [min(max(i + delta, 0), panels.count - 1)]
     }
 
     private func split(across: Bool) {
         guard let i = single else { return }
-        let before = panels.count
-        panels = PanelEditing.split(panels, at: i, across: across, rightToLeft: model.rightToLeft)
-        if panels.count > before { selection = [i, i + 1] } else { NSSound.beep() }   // too small to halve
+        let halves = PanelEditing.split(panels, at: i, across: across, rightToLeft: model.rightToLeft)
+        guard halves.count > panels.count else { NSSound.beep(); return }   // too small to halve
+        record()
+        panels = halves
+        selection = [i, i + 1]
+    }
+
+    private func deleteSelection() {
+        // Not mid-drag: the drag holds a panel index that deleting would make stale.
+        guard !selection.isEmpty, drag == nil else { return }
+        record()
+        panels.remove(atOffsets: IndexSet(selection))
+        selection = []
+    }
+
+    // MARK: - Undo
+
+    /// Called before each change to the boxes, so ⌘Z can take it back.
+    private func record() {
+        undos.append(Snapshot(panels: panels, selection: selection, drawn: drawn))
+        redos.removeAll()
+    }
+
+    private func undo() {
+        guard drag == nil, let last = undos.popLast() else { return }
+        redos.append(Snapshot(panels: panels, selection: selection, drawn: drawn))
+        (panels, selection, drawn) = (last.panels, last.selection, last.drawn)
+    }
+
+    private func redo() {
+        guard drag == nil, let next = redos.popLast() else { return }
+        undos.append(Snapshot(panels: panels, selection: selection, drawn: drawn))
+        (panels, selection, drawn) = (next.panels, next.selection, next.drawn)
     }
 
     private func save() {

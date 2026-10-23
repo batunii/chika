@@ -165,7 +165,9 @@ enum ReadingProgress {
         return drawn
     }
 
-    static func deletePanelOverride(_ url: URL, page: Int) {
+    /// False if it was not deleted, so the edit is kept.
+    @discardableResult
+    static func deletePanelOverride(_ url: URL, page: Int) -> Bool {
         run("DELETE FROM panel_overrides WHERE id = ? AND page = ?", [key(url), page])
     }
 

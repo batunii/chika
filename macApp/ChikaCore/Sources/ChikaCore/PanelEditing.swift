@@ -17,6 +17,13 @@ public enum PanelEditing {
         return Panel(left: panel.left + dx, top: panel.top + dy, right: panel.right + dx, bottom: panel.bottom + dy)
     }
 
+    /// `panel` grown by `delta` on every side (shrunk when negative), kept on the page and no side
+    /// shorter than `minSide`.
+    public static func resized(_ panel: Panel, by delta: Float) -> Panel {
+        let dx = max(delta, (minSide - panel.width) / 2), dy = max(delta, (minSide - panel.height) / 2)
+        return rect(panel.left - dx, panel.top - dy, panel.right + dx, panel.bottom + dy)
+    }
+
     /// The panels at `indices` replaced by their bounding box, read where the earliest of them was.
     public static func merged(_ panels: [Panel], _ indices: Set<Int>) -> [Panel] {
         let picked = indices.filter(panels.indices.contains).sorted()

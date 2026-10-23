@@ -47,6 +47,7 @@ private struct ReaderContent: View {
     @State private var scrollTarget: CGFloat?
     // The panel editor replaces the page and both bars (so their Esc and Return shortcuts are gone).
     @State private var editing = false
+    @State private var editWhenReady = false
     // A page number being typed: Return jumps to it; it goes 1.5 s after the last digit.
     @State private var typedPage = ""
     /// Counts digit presses, so each one restarts the entry's timeout even when the digits stay the same.
@@ -134,13 +135,15 @@ private struct ReaderContent: View {
             if !items.isEmpty { show("Copied") }
             return items
         }
-        .onKeyPress(.leftArrow) { step(-1); return .handled }
-        .onKeyPress(.rightArrow) { step(1); return .handled }
+        // Not while editing: taking these keys there kept them from the editor (and its Delete from working).
+        .onKeyPress(.leftArrow) { guard !editing else { return .ignored }; step(-1); return .handled }
+        .onKeyPress(.rightArrow) { guard !editing else { return .ignored }; step(1); return .handled }
         .onKeyPress(.space, phases: .down) { press in
+            guard !editing else { return .ignored }
             step(press.modifiers.contains(.shift) ? -1 : 1); return .handled
         }
-        .onKeyPress(.pageUp) { turn(next: false); return .handled }
-        .onKeyPress(.pageDown) { turn(next: true); return .handled }
+        .onKeyPress(.pageUp) { guard !editing else { return .ignored }; turn(next: false); return .handled }
+        .onKeyPress(.pageDown) { guard !editing else { return .ignored }; turn(next: true); return .handled }
         .onKeyPress(characters: .decimalDigits, phases: .down) { press in
             // A digit with ⌘, ⌃ or ⌥ is another shortcut's (⌘1-3 pick the mode); other scripts' digits are not page numbers.
             guard !editing, press.modifiers.isDisjoint(with: [.command, .control, .option]),
@@ -180,7 +183,12 @@ private struct ReaderContent: View {
             if voiceOver && model.mode != .scroll && !editing { AccessibilityNotification.Announcement(pageAccessibilityLabel).post() }
         }
         // The peek holds auto-advance while the editor is open (and not after this window closes mid-edit).
-        .onChange(of: editing) { model.editingPanels = editing }
+        .onChange(of: editing) {
+            model.editingPanels = editing
+            if !editing { focused = true }   // the editor took the keys; the reader needs them back
+        }
+        // ⌘E from another mode switched to Panels: the editor opens once the page's panels are in.
+        .onChange(of: model.canEditPanels) { if editWhenReady && model.canEditPanels { editWhenReady = false; editing = true } }
         .onDisappear {
             model.editingPanels = false; speaker.isOn = false; translator.stop()
             // isCurrent holds a copy of this view, and with it the speaker, translator and model: a cycle that
@@ -203,7 +211,10 @@ private struct ReaderContent: View {
             speaker.update(key: aloudKey, lines: aloudLines, wait: model.mode == .panels && !model.slots.onPanel ? 0.6 : 1.5)
         }
         .onChange(of: settings.speechRate, initial: true) { speaker.rate = settings.speechRate }
-        .onChange(of: model.mode) { if model.mode == .scroll { speaker.isOn = false } }
+        .onChange(of: model.mode) {
+            if model.mode == .scroll { speaker.isOn = false }
+            if model.mode != .panels { editWhenReady = false }
+        }
         .onAppear {
             speaker.onDone = { [model, weak speaker] in
                 // Blocked here is the end of the book: the view was in, so it is not waiting for detection.
@@ -645,7 +656,6 @@ private struct ReaderContent: View {
                 Divider()
                 Button("Edit Panels") { editPanels() }
                     .keyboardShortcut("e", modifiers: .command)
-                    .disabled(!model.canEditPanels)
             } label: {
                 Label("More", systemImage: "ellipsis.circle")
                     .labelStyle(.iconOnly)
@@ -763,10 +773,12 @@ private struct ReaderContent: View {
         }
     }
 
-    /// Opens the panel editor (⌘E) on the current page; Panels mode only, once the page and its panels are in.
+    /// Opens the panel editor (⌘E) on the current page once the page and its panels are in, switching
+    /// to Panels mode first if needed.
     private func editPanels() {
-        guard model.canEditPanels else { NSSound.beep(); return }
-        editing = true
+        if model.canEditPanels { editing = true }
+        else if model.mode != .panels { editWhenReady = true; model.setMode(.panels) }
+        else { show("Panels are still loading") }
     }
 
     /// Whole page, also dropping any manual zoom (even when already on the whole page).

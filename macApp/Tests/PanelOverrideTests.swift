@@ -139,7 +139,14 @@ final class PanelOverrideTests: XCTestCase {
         // Reset forgets the edit and detects the page again (the detector needs the page's image), or
         // takes the detection the background pre-detection already stored.
         while model.image == nil, Date.now < deadline { try await Task.sleep(for: .milliseconds(20)) }
-        model.resetPanels(page: 0)
+        // A reset the database cannot take keeps the edit, which would otherwise come back on reopening.
+        let saved = ReadingProgress.databaseURL, blocker = dir.appendingPathComponent("file")
+        try Data().write(to: blocker)
+        ReadingProgress.databaseURL = blocker.appendingPathComponent("progress.sqlite")   // under a file: cannot open
+        XCTAssertFalse(model.resetPanels(page: 0))
+        XCTAssertTrue(model.pageEdited)
+        ReadingProgress.databaseURL = saved
+        XCTAssertTrue(model.resetPanels(page: 0))
         XCTAssertFalse(model.pageEdited)
         XCTAssertNil(ReadingProgress.panelOverride(comic, page: 0))
         let landed = Date.now + 20   // wait for it, so it cannot land during a later test
