@@ -213,7 +213,10 @@ struct BalloonLabels: View {
         GeometryReader { geo in
             ForEach(balloons.filter { $0.translated != nil }) { balloon in
                 BalloonLabel(balloon: balloon, fontSize: geo.size.height * 0.03)
-                    .frame(width: CGFloat(balloon.box.width) * geo.size.width, height: CGFloat(balloon.box.height) * geo.size.height)
+                    // The detector's text box sits inside the lettering's edges, so the original would peek out
+                    // round a label of the same size. shortcut: fixed 25% growth, use Vision's own text boxes if it
+                    // ever covers a balloon's outline.
+                    .frame(width: CGFloat(balloon.box.width) * geo.size.width * 1.25, height: CGFloat(balloon.box.height) * geo.size.height * 1.25)
                     .position(x: CGFloat(balloon.box.centerX) * geo.size.width, y: CGFloat(balloon.box.centerY) * geo.size.height)
             }
         }
