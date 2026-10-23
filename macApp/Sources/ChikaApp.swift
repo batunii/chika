@@ -28,7 +28,7 @@ struct ChikaApp: App {
             if let url { PeekView(comicURL: url).environmentObject(settings).environmentObject(readers) }
         }
         .handlesExternalEvents(matching: [])
-        .windowStyle(.plain)   // no title bar, traffic lights or frame: just the panel
+        .windowStyle(.hiddenTitleBar)   // titled underneath so it takes keys; the chrome is hidden in PeekView
         .windowLevel(.floating)
         .windowResizability(.contentSize)
         Settings { SettingsView().environmentObject(settings) }

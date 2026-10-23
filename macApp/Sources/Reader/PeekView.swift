@@ -209,11 +209,17 @@ private struct PeekWindowConfigurator: NSViewRepresentable {
                 window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
                 window.hidesOnDeactivate = false
                 window.isMovableByWindowBackground = true
-                // A plain window is borderless: keep it resizable from its edges and let it take keys
-                // (arrows, Space, P, ⌘C) and minimize like a titled one.
-                window.styleMask.formUnion([.resizable, .miniaturizable])
+                // Titled (a borderless window never takes keys: arrows, Space, P, ⌘C), with its title bar
+                // and buttons invisible so only the panel shows.
+                window.titlebarAppearsTransparent = true
+                window.titleVisibility = .hidden
+                window.isOpaque = false
+                window.backgroundColor = .clear   // the rounded panel, not a square window behind it
+                for button in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] {
+                    window.standardWindowButton(button)?.isHidden = true
+                }
                 window.hasShadow = true
-                // A plain window opens at its content's largest size, often off screen: start small and centred.
+                // Start small and centred whatever size the window system first gave it.
                 window.setContentSize(CGSize(width: 420, height: 420 * aspect.height / aspect.width))
                 window.center()
                 self.window = window
