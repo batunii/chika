@@ -220,7 +220,9 @@ struct LibraryView: View {
                 if !resume.isEmpty {
                     KickerText("Continue Reading", size: 13, color: Chika.ochre)
                     ScrollView(.horizontal, showsIndicators: false) {
-                        LazyHStack(alignment: .top, spacing: 24) {
+                        // Not lazy: a lazy row sizes its height before every card is measured, clipping
+                        // a card whose title wraps to two lines.
+                        HStack(alignment: .top, spacing: 24) {
                             ForEach(resume, id: \.self) { url in card(url).frame(width: 150) }
                         }
                         .padding(.bottom, 8)   // room for the cards' hard shadow
