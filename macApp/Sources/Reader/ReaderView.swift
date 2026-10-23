@@ -260,6 +260,8 @@ private struct ReaderContent: View {
             Reticle(color: Chika.crimson.opacity(0.45), inset: 6, length: 16, stroke: 2).padding(6)
         } }
         .contentShape(Rectangle())
+        // Zoomed in, a two-finger swipe is left alone rather than throwing the zoom away with the page.
+        .background(SwipeToTurn(rightToLeft: model.rightToLeft) { next in if zoom <= 1 { turn(next: next) } })
         .accessibilityElement(children: .contain)
         .accessibilityLabel(pageAccessibilityLabel)
         .accessibilityHint(PageAccessibility.hint)
@@ -616,6 +618,54 @@ private struct ReaderContent: View {
         let keep = 0.15 * min(scaledH, ch)
         let y = min(max(raw.height, keep - scaledH - baseTop), ch - keep - baseTop)
         return CGSize(width: x, height: y)
+    }
+}
+
+/// A two-finger horizontal swipe over the page turns it (a spread in Two pages), once per gesture.
+/// SwiftUI has no swipe on the Mac, so a local monitor reads the window's scroll events; it never
+/// takes clicks or swallows events, so the click zones, pinch and drag work as before.
+private struct SwipeToTurn: NSViewRepresentable {
+    let rightToLeft: Bool
+    let turn: (Bool) -> Void
+
+    func makeNSView(context: Context) -> SwipeView { SwipeView() }
+
+    func updateNSView(_ view: SwipeView, context: Context) {
+        view.rightToLeft = rightToLeft
+        view.turn = turn
+    }
+
+    final class SwipeView: NSView {
+        var rightToLeft = false
+        var turn: (Bool) -> Void = { _ in }
+        private var swipe = SwipeTurn()
+        private var tracking = false
+        private var monitor: Any?
+
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }   // clicks stay with the page's gestures
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            if let monitor { NSEvent.removeMonitor(monitor) }
+            monitor = window == nil ? nil : NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
+                self?.scrolled(event)
+                return event
+            }
+        }
+
+        private func scrolled(_ event: NSEvent) {
+            // Fingers on a trackpad only: a mouse wheel has no phase, and momentum after they lift is no swipe.
+            guard event.window === window, event.momentumPhase.isEmpty else { return }
+            if event.phase == .began {
+                tracking = bounds.contains(convert(event.locationInWindow, from: nil))
+                swipe.begin()
+            }
+            guard tracking, event.phase == .began || event.phase == .changed else { return }
+            // Natural scrolling reports the fingers' own direction; without it the deltas are flipped.
+            let fingers: CGFloat = event.isDirectionInvertedFromDevice ? 1 : -1
+            if let next = swipe.moved(dx: Float(event.scrollingDeltaX * fingers), dy: Float(event.scrollingDeltaY * fingers),
+                                      rightToLeft: rightToLeft) { turn(next) }
+        }
     }
 }
 

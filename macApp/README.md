@@ -43,6 +43,10 @@ Each comic remembers its mode (the book/grid menu in the reader's top bar):
 - **Scroll** (⌘3): every page in one vertical strip at the window's width, for webtoons. Swipe or
   use ← → / Space / Page Up/Down to move most of a screen; ⌘[ ⌘] and the scrubber jump to a page.
 
+In Panels and Two pages a two-finger sideways swipe on the trackpad turns the page (the spread in
+Two pages), once per swipe: toward the left reads on, or toward the right for a right-to-left comic.
+It does nothing while the page is zoomed in or the panel editor is open; Scroll scrolls instead.
+
 ## Night filters
 
 For reading late, the moon menu in the reader's top bar (or Settings, ⌘,) changes the pages, never
