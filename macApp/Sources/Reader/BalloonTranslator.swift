@@ -10,14 +10,15 @@ enum BalloonReader {
     /// Stored texts read by another version are read again: bump it when recognition changes.
     static let version = 1
 
-    /// The balloon's text in reading order, "" when there is none.
-    static func text(of balloon: Panel, in page: CGImage) async -> String {
+    /// The balloon's text in reading order, "" when there is none, nil when recognition failed or was
+    /// cancelled (not stored, so it is tried again).
+    static func text(of balloon: Panel, in page: CGImage) async -> String? {
         guard let crop = crop(BalloonText.cropRect(balloon), of: page) else { return "" }
         // The Swift request (macOS 15) reads vertical Japanese columns; VNRecognizeTextRequest
         // finds nothing in them. Accurate by default; the language is detected per crop.
         var request = RecognizeTextRequest()
         request.automaticallyDetectsLanguage = true
-        guard let lines = try? await request.perform(on: crop) else { return "" }
+        guard let lines = try? await request.perform(on: crop) else { return nil }
         return BalloonText.join(lines.compactMap { line in
             guard let text = line.topCandidates(1).first?.string else { return nil }
             let b = line.boundingBox.cgRect   // normalized, origin bottom-left
@@ -72,6 +73,8 @@ final class BalloonTranslator: ObservableObject {
     private var url: URL?
     private var target = Locale.current.language
     private var work: Task<Void, Never>?
+    /// The source language of the batch the session was last asked for (nil: not recognized).
+    private var batchSource: String?
 
     /// The top bar's note, nil when there is nothing to say.
     var status: String? { failed ? "can't translate" : (reading && isOn) || translating ? "translating…" : nil }
@@ -82,7 +85,8 @@ final class BalloonTranslator: ObservableObject {
     /// Read aloud wants the text, so the balloons are read even with Translate off (and not translated).
     func show(_ pages: [(page: Int, image: CGImage)], of url: URL, revision: String?, rtl: Bool, target: Locale.Language,
               aloud: Bool = false) {
-        work?.cancel()
+        let previous = work
+        previous?.cancel()
         balloons = [:]
         failed = false
         reading = false
@@ -93,11 +97,13 @@ final class BalloonTranslator: ObservableObject {
         reading = true
         let targetID = target.minimalIdentifier
         work = Task {
+            await previous?.value   // one page's recognition at a time, however fast the pages turn
             for (page, image) in pages {
+                if Task.isCancelled { return }
                 var boxes = ReadingProgress.detection(url, page: page, rtl: rtl)?.bubbles
                 if boxes == nil {
                     // Two pages mode never detects, and an edited page may never have been.
-                    let found = await Task.detached(priority: .userInitiated) { ReaderModel.detector.detect(image) }.value
+                    let found = await offMain { ReaderModel.detector.detect(image) }
                     if Task.isCancelled { return }
                     if let found { ReadingProgress.setDetection(url, page: page, found, revision: revision) }
                     boxes = found?.bubbles
@@ -105,17 +111,17 @@ final class BalloonTranslator: ObservableObject {
                 let known = ReadingProgress.balloonTexts(url, page: page)
                 for box in boxes ?? [] {
                     let stored = known[box]
-                    let (text, paper) = await Task.detached(priority: .userInitiated) {
-                        (stored == nil ? await BalloonReader.text(of: box, in: image) : stored!, BalloonReader.paper(of: box, in: image))
-                    }.value
+                    let (text, paper) = await offMain {
+                        (stored == nil ? await BalloonReader.text(of: box, in: image) : stored, BalloonReader.paper(of: box, in: image))
+                    }
                     if Task.isCancelled { return }
-                    if stored == nil { ReadingProgress.setBalloonText(url, page: page, box: box, text: text, revision: revision) }
-                    guard !text.isEmpty else { continue }
+                    if stored == nil, let text { ReadingProgress.setBalloonText(url, page: page, box: box, text: text, revision: revision) }
+                    guard let text, !text.isEmpty else { continue }
                     balloons[page, default: []].append(Balloon(
                         box: box, original: text,
                         paper: Color(red: Double(paper.r) / 255, green: Double(paper.g) / 255, blue: Double(paper.b) / 255),
                         darkInk: BalloonText.inkIsDark(on: paper),
-                        translated: ReadingProgress.translation(url, source: text, target: targetID)))
+                        translated: ReadingProgress.translation(url, source: text, from: Self.language(of: text), target: targetID)))
                 }
                 if isOn { requestTranslation() }   // this page's balloons translate while the next page is read
             }
@@ -123,9 +129,20 @@ final class BalloonTranslator: ObservableObject {
         }
     }
 
-    /// The reader's `.translationTask` session: translates every balloon still waiting.
+    /// Stops reading and forgets the balloons, for a reader that closes.
+    func stop() {
+        work?.cancel()
+        work = nil
+        balloons = [:]
+        configuration = nil
+        reading = false
+    }
+
+    /// The reader's `.translationTask` session: translates the balloons still waiting in the session's
+    /// source language, then asks for the next language's session.
     func translate(with session: TranslationSession) async {
-        let texts = pending
+        let source = batchSource
+        let texts = pending.first { $0.source == source }?.texts ?? []
         guard let url, !texts.isEmpty else { return }
         let target = self.target
         translating = true
@@ -134,41 +151,57 @@ final class BalloonTranslator: ObservableObject {
             // Prompts for the language download first when it is not installed.
             let responses = try await session.translations(from: texts.map { TranslationSession.Request(sourceText: $0) })
             for response in responses {
-                ReadingProgress.setTranslation(url, source: response.sourceText, target: target.minimalIdentifier, text: response.targetText)
+                ReadingProgress.setTranslation(url, source: response.sourceText, from: source, target: target.minimalIdentifier,
+                                               text: response.targetText)
             }
             guard url == self.url, target == self.target else { return }   // stored, but the reader moved on
             let found = Dictionary(responses.map { ($0.sourceText, $0.targetText) }, uniquingKeysWith: { a, _ in a })
             for (page, list) in balloons {
                 balloons[page] = list.map { var b = $0; b.translated = b.translated ?? found[b.original]; return b }
             }
+            requestTranslation(pending.filter { $0.source != source })
         } catch {
             // An unsupported pair, a declined download, or no network to fetch the language.
             if !Task.isCancelled { failed = true }
         }
     }
 
-    /// Distinct texts on screen still to translate: not yet translated, with letters, and not
-    /// already in the target language.
-    private var pending: [String] {
-        let texts = balloons.values.joined().filter { $0.translated == nil }.map(\.original)
-        return Array(Set(texts)).filter { text in
-            guard BalloonText.isWorthTranslating(text) else { return false }
-            guard let language = NLLanguageRecognizer.dominantLanguage(for: text) else { return true }
-            return !BalloonText.sameLanguage(language.rawValue, target.minimalIdentifier)
-        }.sorted()
+    /// Texts on screen still to translate, in batches by language.
+    private var pending: [(source: String?, texts: [String])] {
+        Self.batches(balloons.values.joined().filter { $0.translated == nil }.map(\.original), target: target)
     }
 
-    private func requestTranslation() {
-        let texts = pending
-        guard !texts.isEmpty else { return }
-        // One source for the whole batch: a page is in one language, give or take its sound effects.
-        let source = NLLanguageRecognizer.dominantLanguage(for: texts.joined(separator: "\n")).map { Locale.Language(identifier: $0.rawValue) }
+    /// Distinct texts worth translating (with letters, not already in `target`) grouped by their
+    /// recognized language: a session translates from one source language.
+    static func batches(_ texts: [String], target: Locale.Language) -> [(source: String?, texts: [String])] {
+        let groups = Dictionary(grouping: Set(texts).filter(BalloonText.isWorthTranslating), by: language(of:))
+            .filter { source, _ in source.map { !BalloonText.sameLanguage($0, target.minimalIdentifier) } ?? true }
+        return groups.map { ($0.key, $0.value.sorted()) }.sorted { ($0.source ?? "") < ($1.source ?? "") }
+    }
+
+    /// The text's language as a BCP 47 identifier, nil when it is not recognized.
+    static func language(of text: String) -> String? {
+        NLLanguageRecognizer.dominantLanguage(for: text)?.rawValue
+    }
+
+    /// Asks for a session for the first batch's language (`batches`, else everything pending).
+    private func requestTranslation(_ batches: [(source: String?, texts: [String])]? = nil) {
+        guard let batch = (batches ?? pending).first else { return }
+        batchSource = batch.source
+        let source = batch.source.map { Locale.Language(identifier: $0) }
         if let configuration, configuration.source == source, configuration.target == target {
             self.configuration?.invalidate()
         } else {
             configuration = TranslationSession.Configuration(source: source, target: target)
         }
     }
+}
+
+/// Runs `body` off the main actor and cancels it with the calling task, so a page left behind stops
+/// recognizing and lets go of its images.
+private func offMain<T: Sendable>(_ body: @escaping @Sendable () async -> T) async -> T {
+    let task = Task.detached(priority: .userInitiated, operation: body)
+    return await withTaskCancellationHandler { await task.value } onCancel: { task.cancel() }
 }
 
 /// Translate's labels over one page, in the page's own coordinates: inside the page's transform, so

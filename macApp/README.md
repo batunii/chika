@@ -133,8 +133,9 @@ are left alone, and "can't translate" in the status line means the pair is not s
 download was declined.
 
 Recognized text is stored per comic, page and balloon in the progress database (rows carry
-`BalloonReader.version`: bump it when recognition changes), translations per text and target
-language, so a page is only read and translated once. Both go when an imported comic is deleted.
+`BalloonReader.version`: bump it when recognition changes), translations per text, its language and
+the target language, so a page is only read and translated once. A balloon whose recognition fails is
+not stored and is read again next time. A page mixing languages is translated one language at a time. Both go when an imported comic is deleted.
 
 ## Read aloud
 

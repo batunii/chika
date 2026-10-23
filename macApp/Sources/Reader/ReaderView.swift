@@ -130,7 +130,7 @@ private struct ReaderContent: View {
         }
         // The peek holds auto-advance while the editor is open (and not after this window closes mid-edit).
         .onChange(of: editing) { model.editingPanels = editing }
-        .onDisappear { model.editingPanels = false; speaker.isOn = false }
+        .onDisappear { model.editingPanels = false; speaker.isOn = false; translator.stop() }
         // Translate (and Read aloud's text) follows the pages on screen once they (and in Panels mode their panels) are in.
         .onChange(of: [translator.isOn, speaker.isOn, model.waitingForPage, settings.translationTarget, model.rightToLeft,
                        model.pageImages.map(\.page)] as [AnyHashable], initial: true) {
@@ -287,7 +287,8 @@ private struct ReaderContent: View {
     /// Spread mode: the spread's pages side by side (mirrored for right-to-left), fitted together.
     /// Zoom scales about the centre; drag pans within the zoomed overhang.
     private func spreadPages(size: CGSize) -> some View {
-        let pages = Array(zip(model.imagePages, [model.image, model.facing].compactMap { $0 }))
+        // Zipped before dropping a missing image, so a facing page keeps its own page number.
+        let pages = zip(model.imagePages, [model.image, model.facing]).compactMap { page, image in image.map { (page, $0) } }
         return HStack(spacing: 0) {
             ForEach(Array((model.rightToLeft ? pages.reversed() : pages).enumerated()), id: \.offset) { _, page in
                 Image(decorative: page.1, scale: 1).resizable().scaledToFit()

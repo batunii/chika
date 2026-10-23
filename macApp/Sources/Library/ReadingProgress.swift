@@ -239,18 +239,23 @@ enum ReadingProgress {
             [key(url), page, String(decoding: json, as: UTF8.self), version, text, revision])
     }
 
-    /// The stored translation of a comic's balloon text into `target` (a BCP 47 identifier).
-    static func translation(_ url: URL, source: String, target: String) -> String? {
+    /// The stored translation of a comic's balloon text from language `from` (nil: not recognized)
+    /// into `target` (BCP 47 identifiers).
+    static func translation(_ url: URL, source: String, from: String?, target: String) -> String? {
         var found: String?
-        run("SELECT text FROM translations WHERE id = ? AND source = ? AND target = ?", [key(url), source, target]) { row in
+        run("SELECT text FROM translations WHERE id = ? AND source = ? AND target = ?", [key(url), source, pair(from, target)]) { row in
             found = String(cString: sqlite3_column_text(row, 0))
         }
         return found
     }
 
-    static func setTranslation(_ url: URL, source: String, target: String, text: String) {
-        run("INSERT OR REPLACE INTO translations(id, source, target, text) VALUES(?, ?, ?, ?)", [key(url), source, target, text])
+    static func setTranslation(_ url: URL, source: String, from: String?, target: String, text: String) {
+        run("INSERT OR REPLACE INTO translations(id, source, target, text) VALUES(?, ?, ?, ?)", [key(url), source, pair(from, target), text])
     }
+
+    /// The target column holds "from>target": rows from before it (one source language per batch, so
+    /// possibly mistranslated) never match and are translated again.
+    private static func pair(_ from: String?, _ target: String) -> String { "\(from ?? "")>\(target)" }
 
     // MARK: - Migration
 

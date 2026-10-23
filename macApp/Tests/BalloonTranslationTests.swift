@@ -58,25 +58,27 @@ final class BalloonTranslationTests: XCTestCase {
         XCTAssertEqual(ReadingProgress.balloonTexts(a, page: 2), [:])
         XCTAssertEqual(ReadingProgress.balloonTexts(a, page: 1, version: BalloonReader.version + 1), [:])   // another reader reads again
 
-        ReadingProgress.setTranslation(a, source: "今日は", target: "en", text: "Today")
-        ReadingProgress.setTranslation(a, source: "今日は", target: "fr", text: "Aujourd'hui")
-        XCTAssertEqual(ReadingProgress.translation(a, source: "今日は", target: "en"), "Today")
-        XCTAssertEqual(ReadingProgress.translation(a, source: "今日は", target: "fr"), "Aujourd'hui")
-        XCTAssertNil(ReadingProgress.translation(a, source: "今日は", target: "de"))
+        ReadingProgress.setTranslation(a, source: "今日は", from: "ja", target: "en", text: "Today")
+        ReadingProgress.setTranslation(a, source: "今日は", from: "ja", target: "fr", text: "Aujourd'hui")
+        XCTAssertEqual(ReadingProgress.translation(a, source: "今日は", from: "ja", target: "en"), "Today")
+        XCTAssertEqual(ReadingProgress.translation(a, source: "今日は", from: "ja", target: "fr"), "Aujourd'hui")
+        XCTAssertNil(ReadingProgress.translation(a, source: "今日は", from: "ja", target: "de"))
+        XCTAssertNil(ReadingProgress.translation(a, source: "今日は", from: "zh-Hans", target: "en"))   // read as another language
 
         ReadingProgress.setBalloonText(b, page: 1, box: balloon, text: "どこ", revision: ReadingProgress.revision(b))
-        ReadingProgress.setTranslation(b, source: "どこ", target: "en", text: "Where")
+        ReadingProgress.setTranslation(b, source: "どこ", from: "ja", target: "en", text: "Where")
         ReadingProgress.clear(a)
         XCTAssertEqual(ReadingProgress.balloonTexts(a, page: 1), [:])
-        XCTAssertNil(ReadingProgress.translation(a, source: "今日は", target: "en"))
+        XCTAssertNil(ReadingProgress.translation(a, source: "今日は", from: "ja", target: "en"))
         XCTAssertEqual(ReadingProgress.balloonTexts(b, page: 1), [balloon: "どこ"])
-        XCTAssertEqual(ReadingProgress.translation(b, source: "どこ", target: "en"), "Where")
+        XCTAssertEqual(ReadingProgress.translation(b, source: "どこ", from: "ja", target: "en"), "Where")
     }
 
     // Real Vision text recognition on a rendered balloon of vertical Japanese.
     func testReadsVerticalJapaneseInReadingOrder() async throws {
         let image = page()
-        let text = await BalloonReader.text(of: balloon, in: image)
+        let read = await BalloonReader.text(of: balloon, in: image)
+        let text = try XCTUnwrap(read)
         XCTAssertTrue(text.hasPrefix("今日は"), text)   // the right-hand column first
         XCTAssertTrue(text.contains("天気"), text)
         XCTAssertTrue(text.contains("行こう"), text)
@@ -107,7 +109,7 @@ final class BalloonTranslationTests: XCTestCase {
         XCTAssertEqual(translator.configuration?.target, english)
 
         // Stored translations come back without a session; text already in the target is left alone.
-        ReadingProgress.setTranslation(url, source: read.original, target: "en", text: "Nice weather")
+        ReadingProgress.setTranslation(url, source: read.original, from: "ja", target: "en", text: "Nice weather")
         translator.show([(0, page())], of: url, revision: ReadingProgress.revision(url), rtl: false, target: english)
         while translator.reading, Date.now < deadline { try await Task.sleep(for: .milliseconds(20)) }
         XCTAssertEqual(translator.balloons[0]?.first?.translated, "Nice weather")
@@ -116,6 +118,42 @@ final class BalloonTranslationTests: XCTestCase {
         translator.show([(0, page())], of: url, revision: ReadingProgress.revision(url), rtl: false, target: english)
         XCTAssertTrue(translator.balloons.isEmpty)
         XCTAssertNil(translator.configuration)
+    }
+
+    // A page mixing languages goes out in one batch per language; text already in the target stays.
+    func testBatchesAreOneSourceLanguageEach() {
+        let texts = ["今日はいい天気ですね", "Where are we going tonight?", "今日はいい天気ですね", "どこへ行こうか", "!?"]
+        let french = BalloonTranslator.batches(texts, target: Locale.Language(identifier: "fr"))
+        XCTAssertEqual(french.map(\.source), ["en", "ja"])
+        XCTAssertEqual(french.last?.texts, ["どこへ行こうか", "今日はいい天気ですね"])
+        XCTAssertEqual(BalloonTranslator.batches(texts, target: Locale.Language(identifier: "en-GB")).map(\.source), ["ja"])
+    }
+
+    // A recognition that fails (here: cancelled) says so instead of "no text", so it is not stored and is tried again.
+    func testAFailedReadingIsNil() async {
+        let image = page()
+        let read = await Task { () -> String? in
+            withUnsafeCurrentTask { $0?.cancel() }
+            return await BalloonReader.text(of: balloon, in: image)
+        }.value
+        XCTAssertNil(read)
+    }
+
+    // Closing the reader stops the reading before anything is read or stored.
+    func testStopCancelsTheReading() async throws {
+        let url = dir.appendingPathComponent("A.cbz")
+        try FileManager.default.copyItem(at: comic, to: url)
+        ReadingProgress.setDetection(url, page: 0, PageDetection(leftToRight: [.fullPage], rightToLeft: [.fullPage], bubbles: [balloon]),
+                                     revision: ReadingProgress.revision(url))
+        let translator = BalloonTranslator()
+        translator.isOn = true
+        translator.show([(0, page())], of: url, revision: ReadingProgress.revision(url), rtl: false, target: Locale.Language(identifier: "en"))
+        translator.stop()
+        XCTAssertFalse(translator.reading)
+        XCTAssertNil(translator.configuration)
+        try await Task.sleep(for: .seconds(2))
+        XCTAssertTrue(translator.balloons.isEmpty)
+        XCTAssertEqual(ReadingProgress.balloonTexts(url, page: 0), [:])
     }
 
     // Read aloud wants the text without Translate: the balloons are read, nothing is sent to translate.
