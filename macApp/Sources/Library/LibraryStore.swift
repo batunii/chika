@@ -113,7 +113,9 @@ final class LibraryStore: ObservableObject {
     /// An imported copy is deleted. A comic read in place only leaves the library: its bookmark (or
     /// its whole watched folder) is forgotten and the user's file is never touched.
     func delete(_ url: URL) {
-        BookPredetector.shared.cancel(url)   // before its rows are cleared, so no late detection lands
+        // Before its rows are cleared, so no late detection lands; Stop Watching drops every comic of the folder.
+        let gone = sources[url].map { root in sources.filter { $0.value == root }.map(\.key) } ?? [url]
+        gone.forEach(BookPredetector.shared.cancel)
         if let root = sources[url] {
             roots.removeAll { $0.url == root }
             saveBookmarks()

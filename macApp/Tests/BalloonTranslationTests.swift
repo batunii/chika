@@ -51,9 +51,9 @@ final class BalloonTranslationTests: XCTestCase {
         try FileManager.default.copyItem(at: comic, to: b)
         let other = Panel(left: 0.5, top: 0.5, right: 0.9, bottom: 0.9)
 
-        ReadingProgress.setBalloonText(a, page: 1, box: balloon, text: "今日は")
-        ReadingProgress.setBalloonText(a, page: 1, box: other, text: "")   // read, nothing there: not read again
-        ReadingProgress.setBalloonText(a, page: 1, box: balloon, text: "今日はいい")   // replaces
+        ReadingProgress.setBalloonText(a, page: 1, box: balloon, text: "今日は", revision: ReadingProgress.revision(a))
+        ReadingProgress.setBalloonText(a, page: 1, box: other, text: "", revision: ReadingProgress.revision(a))   // read, nothing there: not read again
+        ReadingProgress.setBalloonText(a, page: 1, box: balloon, text: "今日はいい", revision: ReadingProgress.revision(a))   // replaces
         XCTAssertEqual(ReadingProgress.balloonTexts(a, page: 1), [balloon: "今日はいい", other: ""])
         XCTAssertEqual(ReadingProgress.balloonTexts(a, page: 2), [:])
         XCTAssertEqual(ReadingProgress.balloonTexts(a, page: 1, version: BalloonReader.version + 1), [:])   // another reader reads again
@@ -64,7 +64,7 @@ final class BalloonTranslationTests: XCTestCase {
         XCTAssertEqual(ReadingProgress.translation(a, source: "今日は", target: "fr"), "Aujourd'hui")
         XCTAssertNil(ReadingProgress.translation(a, source: "今日は", target: "de"))
 
-        ReadingProgress.setBalloonText(b, page: 1, box: balloon, text: "どこ")
+        ReadingProgress.setBalloonText(b, page: 1, box: balloon, text: "どこ", revision: ReadingProgress.revision(b))
         ReadingProgress.setTranslation(b, source: "どこ", target: "en", text: "Where")
         ReadingProgress.clear(a)
         XCTAssertEqual(ReadingProgress.balloonTexts(a, page: 1), [:])
@@ -89,11 +89,12 @@ final class BalloonTranslationTests: XCTestCase {
     func testTranslatorReadsAPageOnceAndAsksForItsLanguage() async throws {
         let url = dir.appendingPathComponent("A.cbz")
         try FileManager.default.copyItem(at: comic, to: url)
-        ReadingProgress.setDetection(url, page: 0, PageDetection(leftToRight: [.fullPage], rightToLeft: [.fullPage], bubbles: [balloon]))
+        ReadingProgress.setDetection(url, page: 0, PageDetection(leftToRight: [.fullPage], rightToLeft: [.fullPage], bubbles: [balloon]),
+                                     revision: ReadingProgress.revision(url))
         let translator = BalloonTranslator()
         translator.isOn = true
         let english = Locale.Language(identifier: "en")
-        translator.show([(0, page())], of: url, rtl: false, target: english)
+        translator.show([(0, page())], of: url, revision: ReadingProgress.revision(url), rtl: false, target: english)
         let deadline = Date.now + 30
         while translator.reading, Date.now < deadline { try await Task.sleep(for: .milliseconds(20)) }
         XCTAssertFalse(translator.reading)
@@ -107,12 +108,12 @@ final class BalloonTranslationTests: XCTestCase {
 
         // Stored translations come back without a session; text already in the target is left alone.
         ReadingProgress.setTranslation(url, source: read.original, target: "en", text: "Nice weather")
-        translator.show([(0, page())], of: url, rtl: false, target: english)
+        translator.show([(0, page())], of: url, revision: ReadingProgress.revision(url), rtl: false, target: english)
         while translator.reading, Date.now < deadline { try await Task.sleep(for: .milliseconds(20)) }
         XCTAssertEqual(translator.balloons[0]?.first?.translated, "Nice weather")
 
         translator.isOn = false
-        translator.show([(0, page())], of: url, rtl: false, target: english)
+        translator.show([(0, page())], of: url, revision: ReadingProgress.revision(url), rtl: false, target: english)
         XCTAssertTrue(translator.balloons.isEmpty)
         XCTAssertNil(translator.configuration)
     }

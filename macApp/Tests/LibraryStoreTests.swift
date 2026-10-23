@@ -96,7 +96,7 @@ final class LibraryStoreTests: XCTestCase {
         let bubble = Panel(left: 0.1, top: 0.1, right: 0.2, bottom: 0.2)
         let found = PageDetection(leftToRight: [left, right], rightToLeft: [right, left], bubbles: [bubble])
 
-        ReadingProgress.setDetection(a, page: 2, found, version: 1)
+        ReadingProgress.setDetection(a, page: 2, found, revision: ReadingProgress.revision(a), version: 1)
         XCTAssertEqual(ReadingProgress.detection(a, page: 2, rtl: false, version: 1)?.regions, [left, right])
         XCTAssertEqual(ReadingProgress.detection(a, page: 2, rtl: true, version: 1)?.regions, [right, left])
         XCTAssertEqual(ReadingProgress.detection(a, page: 2, rtl: true, version: 1)?.bubbles, [bubble])
@@ -107,14 +107,84 @@ final class LibraryStoreTests: XCTestCase {
         // A new detector version ignores the old rows, then replaces them.
         XCTAssertNil(ReadingProgress.detection(a, page: 2, rtl: false, version: 2))
         XCTAssertEqual(ReadingProgress.detectedPages(a, version: 2), [])
-        ReadingProgress.setDetection(a, page: 2, PageDetection(leftToRight: [right], rightToLeft: [left], bubbles: []), version: 2)
+        ReadingProgress.setDetection(a, page: 2, PageDetection(leftToRight: [right], rightToLeft: [left], bubbles: []),
+                                     revision: ReadingProgress.revision(a), version: 2)
         XCTAssertEqual(ReadingProgress.detection(a, page: 2, rtl: false, version: 2)?.regions, [right])
         XCTAssertNil(ReadingProgress.detection(a, page: 2, rtl: false, version: 1))
 
-        ReadingProgress.setDetection(b, page: 0, found, version: 2)
+        ReadingProgress.setDetection(b, page: 0, found, revision: ReadingProgress.revision(b), version: 2)
         ReadingProgress.clear(a)
         XCTAssertEqual(ReadingProgress.detectedPages(a, version: 2), [])
         XCTAssertEqual(ReadingProgress.detectedPages(b, version: 2), [0])
+    }
+
+    func testAComicEditedInPlaceForgetsItsDetectionsButKeepsTheReadersOwnData() throws {
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let a = dir.appendingPathComponent("A.cbz")
+        try FileManager.default.copyItem(at: comic, to: a)
+        let old = ReadingProgress.revision(a)
+        let found = PageDetection(leftToRight: [.fullPage], rightToLeft: [.fullPage], bubbles: [.fullPage])
+        ReadingProgress.setDetection(a, page: 0, found, revision: old)
+        ReadingProgress.setBalloonText(a, page: 0, box: .fullPage, text: "hi", revision: old)
+        ReadingProgress.set(a, page: 3, step: 1, total: 8, rtl: false, mode: "panels")
+        ReadingProgress.toggleBookmark(a, page: 2, step: -1)
+        ReadingProgress.setPanelOverride(a, page: 1, panels: [.fullPage])
+        XCTAssertEqual(ReadingProgress.detectedPages(a), [0])
+
+        // A page appended in place: same inode, so same key, but another size and date.
+        let handle = try FileHandle(forWritingTo: a)
+        try handle.seekToEnd()
+        try handle.write(contentsOf: Data(count: 16))
+        try handle.close()
+        try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSinceNow: 5)], ofItemAtPath: a.path)
+        XCTAssertNotEqual(ReadingProgress.revision(a), old)
+        XCTAssertNil(ReadingProgress.detection(a, page: 0, rtl: false))
+        XCTAssertEqual(ReadingProgress.detectedPages(a), [])
+        XCTAssertEqual(ReadingProgress.balloonTexts(a, page: 0), [:])
+        ReadingProgress.setDetection(a, page: 0, found, revision: old)   // read before the edit: dropped
+        XCTAssertEqual(ReadingProgress.detectedPages(a), [])
+        XCTAssertEqual(ReadingProgress.get(a)?.page, 3)
+        XCTAssertEqual(ReadingProgress.bookmarks(a), [Bookmark(page: 2, step: -1)])
+        XCTAssertEqual(ReadingProgress.panelOverride(a, page: 1), [.fullPage])
+    }
+
+    func testReaderWorkLandingAfterADeleteLeavesNoRows() throws {
+        let store = LibraryStore(directory: dir, defaults: ReadingProgress.defaults)
+        let a = dir.appendingPathComponent("A.cbz")
+        try FileManager.default.copyItem(at: comic, to: a)
+        store.refresh()
+        let revision = ReadingProgress.revision(a)   // what an open reader holds
+        store.delete(a)
+        ReadingProgress.setDetection(a, page: 0, PageDetection(leftToRight: [], rightToLeft: [], bubbles: []), revision: revision)
+        ReadingProgress.setBalloonText(a, page: 0, box: .fullPage, text: "late", revision: revision)
+
+        var db: OpaquePointer?, stmt: OpaquePointer?
+        XCTAssertEqual(sqlite3_open(ReadingProgress.databaseURL.path, &db), SQLITE_OK)
+        defer { sqlite3_close(db) }
+        for table in ["detections", "balloon_text"] {
+            sqlite3_prepare_v2(db, "SELECT COUNT(*) FROM \(table)", -1, &stmt, nil)
+            XCTAssertEqual(sqlite3_step(stmt), SQLITE_ROW)
+            XCTAssertEqual(sqlite3_column_int(stmt, 0), 0, table)
+            sqlite3_finalize(stmt)
+        }
+    }
+
+    func testStopWatchingAFolderStopsPredetectingAllItsComics() throws {
+        let folder = dir.appendingPathExtension("watched")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let one = folder.appendingPathComponent("One.cbz"), two = folder.appendingPathComponent("Two.cbz")
+        try FileManager.default.copyItem(at: comic, to: one)
+        try FileManager.default.copyItem(at: comic, to: two)
+        let store = LibraryStore(directory: dir, defaults: ReadingProgress.defaults)
+        store.addInPlace(folder)
+        let found = Set(store.comics)
+        BookPredetector.shared.add(found.first { $0.lastPathComponent == "One.cbz" }!)
+        BookPredetector.shared.add(found.first { $0.lastPathComponent == "Two.cbz" }!)
+
+        store.delete(found.first { $0.lastPathComponent == "One.cbz" }!)
+        let queued = BookPredetector.shared.waiting + [BookPredetector.shared.running?.url].compactMap { $0 }
+        XCTAssertTrue(found.isDisjoint(with: queued))
     }
 
     func testWatchedFolderIsReadInPlaceAndNeverDeleted() throws {

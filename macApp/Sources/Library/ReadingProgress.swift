@@ -42,6 +42,15 @@ enum ReadingProgress {
         return url.standardizedFileURL.path
     }
 
+    /// The file's size and modification date. Detections and balloon texts are stored with it and only
+    /// read back while it matches: a comic edited in place (a page inserted) keeps its inode, so its key.
+    /// Nil when the file is gone. Not resourceValues: a long-lived URL caches those.
+    static func revision(_ url: URL) -> String? {
+        guard let attributes = try? FileManager.default.attributesOfItem(atPath: url.path),
+              let size = attributes[.size] as? Int, let date = attributes[.modificationDate] as? Date else { return nil }
+        return "\(size):\(date.timeIntervalSince1970)"
+    }
+
     /// Every comic's progress keyed by `key(_:)`. Read once, look up many (the library cards).
     static func all() -> [String: Progress] {
         var map: [String: Progress] = [:]
@@ -168,12 +177,12 @@ enum ReadingProgress {
     // MARK: - Stored detections (instant reopen, background pre-detection)
 
     /// A page's stored zoom regions for one reading direction and its speech balloons; nil when it
-    /// was never detected or was detected by another detector `version`.
+    /// was never detected or was detected by another detector `version` or from another `revision(_:)`.
     static func detection(_ url: URL, page: Int, rtl: Bool,
                           version: Int = CoreMLPanelDetector.version) -> (regions: [Panel], bubbles: [Panel])? {
         var found: (regions: [Panel], bubbles: [Panel])?
-        run("SELECT regions, bubbles FROM detections WHERE id = ? AND page = ? AND rtl = ? AND version = ?",
-            [key(url), page, rtl, version]) { row in
+        run("SELECT regions, bubbles FROM detections WHERE id = ? AND page = ? AND rtl = ? AND version = ? AND rev = ?",
+            [key(url), page, rtl, version, revision(url)]) { row in
             let decode = { (col: Int32) in
                 sqlite3_column_text(row, col).flatMap { try? JSONDecoder().decode([Panel].self, from: Data(String(cString: $0).utf8)) }
             }
@@ -183,21 +192,26 @@ enum ReadingProgress {
     }
 
     /// Stores a page's detection, one row per reading direction, replacing any older version's.
-    static func setDetection(_ url: URL, page: Int, _ detection: PageDetection, version: Int = CoreMLPanelDetector.version) {
+    /// `revision` is the file's `revision(_:)` from before the page was read: nothing is stored once the
+    /// file has changed or gone since (an edit, or a delete with the reader's work still queued).
+    static func setDetection(_ url: URL, page: Int, _ detection: PageDetection, revision: String?,
+                             version: Int = CoreMLPanelDetector.version) {
+        guard let revision, revision == Self.revision(url) else { return }
         let encode = { (panels: [Panel]) in (try? JSONEncoder().encode(panels)).map { String(decoding: $0, as: UTF8.self) } }
         let id = key(url)
         run("BEGIN")
         for rtl in [false, true] {
-            run("INSERT OR REPLACE INTO detections(id, page, rtl, version, regions, bubbles) VALUES(?, ?, ?, ?, ?, ?)",
-                [id, page, rtl, version, encode(detection.regions(rightToLeft: rtl)), encode(detection.bubbles)])
+            run("INSERT OR REPLACE INTO detections(id, page, rtl, version, regions, bubbles, rev) VALUES(?, ?, ?, ?, ?, ?, ?)",
+                [id, page, rtl, version, encode(detection.regions(rightToLeft: rtl)), encode(detection.bubbles), revision])
         }
         run("COMMIT")
     }
 
-    /// The pages stored in both reading directions by this detector `version`.
+    /// The pages stored in both reading directions by this detector `version` from the file as it is now.
     static func detectedPages(_ url: URL, version: Int = CoreMLPanelDetector.version) -> Set<Int> {
         var pages: Set<Int> = []
-        run("SELECT page FROM detections WHERE id = ? AND version = ? GROUP BY page HAVING COUNT(*) = 2", [key(url), version]) { row in
+        run("SELECT page FROM detections WHERE id = ? AND version = ? AND rev = ? GROUP BY page HAVING COUNT(*) = 2",
+            [key(url), version, revision(url)]) { row in
             pages.insert(Int(sqlite3_column_int64(row, 0)))
         }
         return pages
@@ -209,7 +223,8 @@ enum ReadingProgress {
     /// Keyed by the box, not its index, so rows from an older detector's balloons simply never match.
     static func balloonTexts(_ url: URL, page: Int, version: Int = BalloonReader.version) -> [Panel: String] {
         var texts: [Panel: String] = [:]
-        run("SELECT box, text FROM balloon_text WHERE id = ? AND page = ? AND version = ?", [key(url), page, version]) { row in
+        run("SELECT box, text FROM balloon_text WHERE id = ? AND page = ? AND version = ? AND rev = ?",
+            [key(url), page, version, revision(url)]) { row in
             guard let box = sqlite3_column_text(row, 0).flatMap({ try? JSONDecoder().decode(Panel.self, from: Data(String(cString: $0).utf8)) })
             else { return }
             texts[box] = String(cString: sqlite3_column_text(row, 1))
@@ -217,10 +232,11 @@ enum ReadingProgress {
         return texts
     }
 
-    static func setBalloonText(_ url: URL, page: Int, box: Panel, text: String, version: Int = BalloonReader.version) {
-        guard let json = try? JSONEncoder().encode(box) else { return }
-        run("INSERT OR REPLACE INTO balloon_text(id, page, box, version, text) VALUES(?, ?, ?, ?, ?)",
-            [key(url), page, String(decoding: json, as: UTF8.self), version, text])
+    /// `revision` as for `setDetection`.
+    static func setBalloonText(_ url: URL, page: Int, box: Panel, text: String, revision: String?, version: Int = BalloonReader.version) {
+        guard let revision, revision == Self.revision(url), let json = try? JSONEncoder().encode(box) else { return }
+        run("INSERT OR REPLACE INTO balloon_text(id, page, box, version, text, rev) VALUES(?, ?, ?, ?, ?, ?)",
+            [key(url), page, String(decoding: json, as: UTF8.self), version, text, revision])
     }
 
     /// The stored translation of a comic's balloon text into `target` (a BCP 47 identifier).
@@ -283,6 +299,9 @@ enum ReadingProgress {
         // Added in phase 3; each fails harmlessly once the column exists. drawn NULL (an edit saved before it) = not drawn.
         sqlite3_exec(handle, "ALTER TABLE progress ADD COLUMN mode TEXT", nil, nil, nil)
         sqlite3_exec(handle, "ALTER TABLE panel_overrides ADD COLUMN drawn INTEGER", nil, nil, nil)
+        // Rows from before rev existed (NULL) never match, so those pages are read again.
+        sqlite3_exec(handle, "ALTER TABLE detections ADD COLUMN rev TEXT", nil, nil, nil)
+        sqlite3_exec(handle, "ALTER TABLE balloon_text ADD COLUMN rev TEXT", nil, nil, nil)
         connection = (databaseURL, handle)
         return handle
     }

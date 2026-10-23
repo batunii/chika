@@ -114,7 +114,10 @@ peek window never waits on the detector. After a comic is imported or opened, Ch
 not stored yet in the background, one comic at a time at low priority with its own copy of the model,
 so the reader's own detection never queues behind it. Rows carry the detector's version
 (`CoreMLPanelDetector.version`): bump it when the model, decoder or planner changes and old rows are
-detected again. Panel edits still win over stored detections. Deleting an imported comic drops its rows.
+detected again. They also carry the file's size and modification date, so a comic edited in place (a
+page added, say) is detected again rather than given another page's panels; the same goes for the
+stored balloon text below. Progress, bookmarks and panel edits are kept. Panel edits still win over
+stored detections. Deleting an imported comic drops its rows.
 
 ## Translate
 

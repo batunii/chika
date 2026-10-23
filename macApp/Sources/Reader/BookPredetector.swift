@@ -10,8 +10,8 @@ final class BookPredetector {
     static let shared = BookPredetector()
     private nonisolated static let detector = CoreMLPanelDetector()
 
-    private var waiting: [URL] = []
-    private var running: (url: URL, task: Task<Void, Never>)?
+    private(set) var waiting: [URL] = []
+    private(set) var running: (url: URL, task: Task<Void, Never>)?
 
     private init() {
         NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification, object: nil, queue: .main) { _ in
@@ -45,6 +45,7 @@ final class BookPredetector {
         guard running == nil, !waiting.isEmpty else { return }
         let url = waiting.removeFirst()
         let done = ReadingProgress.detectedPages(url)
+        let revision = ReadingProgress.revision(url)   // before the open, so an edit during the pass drops its results
         // Tests swap the database between cases: a job only ever writes to the store it started in.
         let store = ReadingProgress.databaseURL
         let task = Task.detached(priority: .utility) {
@@ -57,7 +58,7 @@ final class BookPredetector {
                           let found = Self.detector.detect(image) else { continue }
                     // Cancelling and saving both run on the main actor, so a dropped comic never gets a late row.
                     await MainActor.run {
-                        if !Task.isCancelled, ReadingProgress.databaseURL == store { ReadingProgress.setDetection(url, page: page, found) }
+                        if !Task.isCancelled, ReadingProgress.databaseURL == store { ReadingProgress.setDetection(url, page: page, found, revision: revision) }
                     }
                 }
             }

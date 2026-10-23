@@ -77,8 +77,9 @@ final class BalloonTranslator: ObservableObject {
     var status: String? { failed ? "can't translate" : reading || translating ? "translating…" : nil }
 
     /// Reads (or recalls) the balloons of `pages` and asks for their translations into `target`.
-    /// Pass no pages to clear. Work for the pages shown before stops.
-    func show(_ pages: [(page: Int, image: CGImage)], of url: URL, rtl: Bool, target: Locale.Language) {
+    /// Pass no pages to clear. Work for the pages shown before stops. `revision` is the reader's
+    /// (ReaderModel.revision): what is read is stored only while the file still matches it.
+    func show(_ pages: [(page: Int, image: CGImage)], of url: URL, revision: String?, rtl: Bool, target: Locale.Language) {
         work?.cancel()
         balloons = [:]
         failed = false
@@ -95,7 +96,7 @@ final class BalloonTranslator: ObservableObject {
                     // Two pages mode never detects, and an edited page may never have been.
                     let found = await Task.detached(priority: .userInitiated) { ReaderModel.detector.detect(image) }.value
                     if Task.isCancelled { return }
-                    if let found { ReadingProgress.setDetection(url, page: page, found) }
+                    if let found { ReadingProgress.setDetection(url, page: page, found, revision: revision) }
                     boxes = found?.bubbles
                 }
                 let known = ReadingProgress.balloonTexts(url, page: page)
@@ -105,7 +106,7 @@ final class BalloonTranslator: ObservableObject {
                         (stored == nil ? await BalloonReader.text(of: box, in: image) : stored!, BalloonReader.paper(of: box, in: image))
                     }.value
                     if Task.isCancelled { return }
-                    if stored == nil { ReadingProgress.setBalloonText(url, page: page, box: box, text: text) }
+                    if stored == nil { ReadingProgress.setBalloonText(url, page: page, box: box, text: text, revision: revision) }
                     guard !text.isEmpty else { continue }
                     balloons[page, default: []].append(Balloon(
                         box: box, original: text,

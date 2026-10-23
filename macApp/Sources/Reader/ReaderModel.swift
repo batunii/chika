@@ -40,6 +40,8 @@ final class ReaderModel: ObservableObject {
     /// The reader's panel editor is open: peek auto-advance holds so the reading position stays put.
     @Published var editingPanels = false
     private(set) var pageCount = 1
+    /// The file's ReadingProgress.revision when it was opened: detections of its pages are stored under it.
+    private(set) var revision: String?
     var title: String { comicURL.deletingPathExtension().lastPathComponent }
 
     private var loader: PageLoader?
@@ -99,6 +101,7 @@ final class ReaderModel: ObservableObject {
     private func load() {
         // Off the main thread: a CBR read in place converts on its first open.
         let url = comicURL
+        revision = ReadingProgress.revision(url)
         Self.ioQueue.async {
             let opened = Result { try ComicOpener.open(url) }
             DispatchQueue.main.async { self.loaded(opened) }
@@ -224,7 +227,7 @@ final class ReaderModel: ObservableObject {
     /// The detector ran: store the result (both directions, so a flip needs no rerun) and land the
     /// current direction's regions. A failed run reads the page whole and stores nothing.
     private func detected(_ found: PageDetection?, page: Int) {
-        if let found { ReadingProgress.setDetection(comicURL, page: page, found) }
+        if let found { ReadingProgress.setDetection(comicURL, page: page, found, revision: revision) }
         landed(found?.regions(rightToLeft: rightToLeft) ?? [.fullPage], page: page)
     }
 

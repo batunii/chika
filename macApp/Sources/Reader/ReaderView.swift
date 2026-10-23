@@ -132,7 +132,7 @@ private struct ReaderContent: View {
         .onChange(of: [translator.isOn, model.waitingForPage, settings.translationTarget, model.rightToLeft,
                        model.pageImages.map(\.page)] as [AnyHashable], initial: true) {
             translator.show(model.waitingForPage ? [] : model.pageImages, of: model.comicURL,
-                            rtl: model.rightToLeft, target: settings.targetLanguage)
+                            revision: model.revision, rtl: model.rightToLeft, target: settings.targetLanguage)
         }
         .translationTask(translator.configuration) { session in await translator.translate(with: session) }
     }
