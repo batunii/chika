@@ -75,6 +75,8 @@ enum ReadingProgress {
         run("DELETE FROM bookmarks WHERE id = ?", [key(url)])
         run("DELETE FROM panel_overrides WHERE id = ?", [key(url)])
         run("DELETE FROM detections WHERE id = ?", [key(url)])
+        run("DELETE FROM balloon_text WHERE id = ?", [key(url)])
+        run("DELETE FROM translations WHERE id = ?", [key(url)])
         changed()
     }
 
@@ -201,6 +203,39 @@ enum ReadingProgress {
         return pages
     }
 
+    // MARK: - Balloon text and translations (Translate)
+
+    /// A page's recognized balloon texts keyed by balloon box, read by text recognizer `version`.
+    /// Keyed by the box, not its index, so rows from an older detector's balloons simply never match.
+    static func balloonTexts(_ url: URL, page: Int, version: Int = BalloonReader.version) -> [Panel: String] {
+        var texts: [Panel: String] = [:]
+        run("SELECT box, text FROM balloon_text WHERE id = ? AND page = ? AND version = ?", [key(url), page, version]) { row in
+            guard let box = sqlite3_column_text(row, 0).flatMap({ try? JSONDecoder().decode(Panel.self, from: Data(String(cString: $0).utf8)) })
+            else { return }
+            texts[box] = String(cString: sqlite3_column_text(row, 1))
+        }
+        return texts
+    }
+
+    static func setBalloonText(_ url: URL, page: Int, box: Panel, text: String, version: Int = BalloonReader.version) {
+        guard let json = try? JSONEncoder().encode(box) else { return }
+        run("INSERT OR REPLACE INTO balloon_text(id, page, box, version, text) VALUES(?, ?, ?, ?, ?)",
+            [key(url), page, String(decoding: json, as: UTF8.self), version, text])
+    }
+
+    /// The stored translation of a comic's balloon text into `target` (a BCP 47 identifier).
+    static func translation(_ url: URL, source: String, target: String) -> String? {
+        var found: String?
+        run("SELECT text FROM translations WHERE id = ? AND source = ? AND target = ?", [key(url), source, target]) { row in
+            found = String(cString: sqlite3_column_text(row, 0))
+        }
+        return found
+    }
+
+    static func setTranslation(_ url: URL, source: String, target: String, text: String) {
+        run("INSERT OR REPLACE INTO translations(id, source, target, text) VALUES(?, ?, ?, ?)", [key(url), source, target, text])
+    }
+
     // MARK: - Migration
 
     /// One-time copy of the old filename-keyed UserDefaults JSON into the table, for the files in
@@ -241,6 +276,9 @@ enum ReadingProgress {
             CREATE TABLE IF NOT EXISTS panel_overrides(id TEXT, page INTEGER, panels TEXT NOT NULL, PRIMARY KEY(id, page));
             CREATE TABLE IF NOT EXISTS detections(id TEXT, page INTEGER, rtl INTEGER, version INTEGER,
                 regions TEXT NOT NULL, bubbles TEXT NOT NULL, PRIMARY KEY(id, page, rtl));
+            CREATE TABLE IF NOT EXISTS balloon_text(id TEXT, page INTEGER, box TEXT, version INTEGER, text TEXT NOT NULL,
+                PRIMARY KEY(id, page, box));
+            CREATE TABLE IF NOT EXISTS translations(id TEXT, source TEXT, target TEXT, text TEXT NOT NULL, PRIMARY KEY(id, source, target));
             """, nil, nil, nil)
         // Added in phase 3; each fails harmlessly once the column exists. drawn NULL (an edit saved before it) = not drawn.
         sqlite3_exec(handle, "ALTER TABLE progress ADD COLUMN mode TEXT", nil, nil, nil)

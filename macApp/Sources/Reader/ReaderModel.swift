@@ -16,7 +16,7 @@ enum ReadingMode: String, CaseIterable {
 final class ReaderModel: ObservableObject {
     enum LoadState: Equatable { case loading, failed(String), ready }
 
-    private nonisolated static let detector = CoreMLPanelDetector()
+    nonisolated static let detector = CoreMLPanelDetector()   // also Translate's, for pages never detected
     private nonisolated static let ioQueue = DispatchQueue(label: "chika.reader.io", qos: .userInitiated)
     private nonisolated static let detectQueue = DispatchQueue(label: "chika.reader.detect", qos: .userInitiated)
     // Android's camera motion: tween(360, FastOutSlowInEasing) between framed views.
@@ -31,7 +31,7 @@ final class ReaderModel: ObservableObject {
     }
     @Published private(set) var image: CGImage?
     @Published private(set) var facing: CGImage?   // spread mode: the spread's second page
-    private var imagePages: [Int] = []   // the pages `image` and `facing` hold; behind slots while one loads
+    private(set) var imagePages: [Int] = []   // the pages `image` and `facing` hold; behind slots while one loads
     @Published private(set) var mode: ReadingMode
     @Published private(set) var detecting = false
     @Published private(set) var pageAlpha: Double = 1   // per-page fade-in (Android's 280ms)
@@ -63,6 +63,12 @@ final class ReaderModel: ObservableObject {
     var here: Bookmark { Bookmark(page: visiblePages[0], step: mode == .panels && slots.onPanel ? slots.step : -1) }
     /// The bookmarks on screen: the one at `here` in panels mode, any on a visible page in Two pages and Scroll.
     var marksHere: [Bookmark] { bookmarks.filter { mode == .panels ? $0 == here : visiblePages.contains($0.page) } }
+    /// The pages on screen with their images, once every one has loaded (Panels and Two pages; Scroll
+    /// never loads `image`).
+    var pageImages: [(page: Int, image: CGImage)] {
+        guard mode != .scroll, imagePages == visiblePages else { return [] }
+        return zip(imagePages, [image, facing]).compactMap { page, image in image.map { (page, $0) } }
+    }
     /// The current page's panels were drawn by hand in the panel editor.
     var pageEdited: Bool { mode == .panels && overrides[slots.page] != nil }
     /// The panel editor (⌘E) needs Panels mode with this page and its panels on screen.

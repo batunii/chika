@@ -17,6 +17,7 @@ final class ChikaSettings: ObservableObject {
     private static let amoledKey = "chika.amoledTheme"
     private static let directionKey = "chika.readingDirection.default.rtl"
     private static let nightFilterKey = "chika.nightFilter"
+    private static let translationTargetKey = "chika.translationTarget"
     private let defaults = UserDefaults.standard
 
     @Published var amoled: Bool {
@@ -34,10 +35,20 @@ final class ChikaSettings: ObservableObject {
         didSet { defaults.set(nightFilter.rawValue, forKey: Self.nightFilterKey) }
     }
 
+    /// The language Translate writes in, a BCP 47 identifier; empty = the system language.
+    @Published var translationTarget: String {
+        didSet { defaults.set(translationTarget, forKey: Self.translationTargetKey) }
+    }
+
+    var targetLanguage: Locale.Language {
+        translationTarget.isEmpty ? Locale.current.language : Locale.Language(identifier: translationTarget)
+    }
+
     init() {
         amoled = defaults.bool(forKey: Self.amoledKey)
         defaultRightToLeft = defaults.bool(forKey: Self.directionKey)
         nightFilter = defaults.string(forKey: Self.nightFilterKey).flatMap(NightFilter.init(rawValue:)) ?? .off
+        translationTarget = defaults.string(forKey: Self.translationTargetKey) ?? ""
     }
 
     /// Full-screen ground: true black in AMOLED, brand ink otherwise.

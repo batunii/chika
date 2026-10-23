@@ -116,6 +116,23 @@ so the reader's own detection never queues behind it. Rows carry the detector's 
 (`CoreMLPanelDetector.version`): bump it when the model, decoder or planner changes and old rows are
 detected again. Panel edits still win over stored detections. Deleting an imported comic drops its rows.
 
+## Translate
+
+The speech-bubble button in the reader's top bar (⇧⌘T) translates the speech balloons on screen,
+in Panels and Two pages (not Scroll or the peek window yet). Each balloon the panel detector found
+is read with Vision's text recognition, which detects the language itself and reads vertical
+Japanese columns right to left, then translated on this Mac by Apple's Translation framework. The
+translation is drawn over the balloon on the balloon's own paper colour, shrunk to fit, and follows
+the camera, zoom and pan like the page; hover a balloon to see the original. Settings (⌘,) picks
+the language to translate into, the system language by default. The first translation from a
+language may ask to download it; text already in the target language and balloons without letters
+are left alone, and "can't translate" in the status line means the pair is not supported or the
+download was declined.
+
+Recognized text is stored per comic, page and balloon in the progress database (rows carry
+`BalloonReader.version`: bump it when recognition changes), translations per text and target
+language, so a page is only read and translated once. Both go when an imported comic is deleted.
+
 ## Training export
 
 File > Export Panel Corrections… turns pages fixed in the panel editor into training data for the

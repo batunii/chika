@@ -1,6 +1,7 @@
 import SwiftUI
 import AppKit
 import UniformTypeIdentifiers
+import Translation
 import ChikaCore
 
 /// Panel-by-panel comic reader with Chika chrome: a branded header (back + title + status), reticle
@@ -40,6 +41,7 @@ private struct ReaderContent: View {
     @State private var viewport: CGFloat = 0
     // The panel editor replaces the page and both bars (so their Esc and Return shortcuts are gone).
     @State private var editing = false
+    @StateObject private var translator = BalloonTranslator()
 
     private var isReady: Bool { model.state == .ready }
     private var marked: Bool { !model.marksHere.isEmpty }
@@ -126,6 +128,13 @@ private struct ReaderContent: View {
         // The peek holds auto-advance while the editor is open (and not after this window closes mid-edit).
         .onChange(of: editing) { model.editingPanels = editing }
         .onDisappear { model.editingPanels = false }
+        // Translate follows the pages on screen once they (and in Panels mode their panels) are in.
+        .onChange(of: [translator.isOn, model.waitingForPage, settings.translationTarget, model.rightToLeft,
+                       model.pageImages.map(\.page)] as [AnyHashable], initial: true) {
+            translator.show(model.waitingForPage ? [] : model.pageImages, of: model.comicURL,
+                            rtl: model.rightToLeft, target: settings.targetLanguage)
+        }
+        .translationTask(translator.configuration) { session in await translator.translate(with: session) }
     }
 
     /// One reading step: a panel, a spread, or (scroll mode) most of a screen.
@@ -198,6 +207,7 @@ private struct ReaderContent: View {
                 Image(decorative: cg, scale: 1)
                     .resizable()
                     .frame(width: CGFloat(cg.width), height: CGFloat(cg.height))
+                    .overlay { BalloonLabels(balloons: translator.balloons[model.imagePages.first ?? -1] ?? []) }
                     // Here dim darkens around the panel instead: drawn in page coordinates under the
                     // same transform, so it stays on the panel through camera tweens, zoom and pan.
                     .modifier(NightFilterEffect(filter: around ? .off : filter))
@@ -221,10 +231,11 @@ private struct ReaderContent: View {
     /// Spread mode: the spread's pages side by side (mirrored for right-to-left), fitted together.
     /// Zoom scales about the centre; drag pans within the zoomed overhang.
     private func spreadPages(size: CGSize) -> some View {
-        let pages = [model.image, model.facing].compactMap { $0 }
+        let pages = Array(zip(model.imagePages, [model.image, model.facing].compactMap { $0 }))
         return HStack(spacing: 0) {
             ForEach(Array((model.rightToLeft ? pages.reversed() : pages).enumerated()), id: \.offset) { _, page in
-                Image(decorative: page, scale: 1).resizable().scaledToFit()
+                Image(decorative: page.1, scale: 1).resizable().scaledToFit()
+                    .overlay { BalloonLabels(balloons: translator.balloons[page.0] ?? []) }
             }
         }
         .modifier(NightFilterEffect(filter: settings.nightFilter))
@@ -236,7 +247,9 @@ private struct ReaderContent: View {
     }
 
     // Top-bar status line, matching Android: "Page X/Y · panel N/M" / "· full page" / "· detecting…".
-    private var pageStatus: String {
+    private var pageStatus: String { pagePosition + (translator.status.map { " · " + $0 } ?? "") }
+
+    private var pagePosition: String {
         if model.mode == .scroll { return "Page \(model.slots.page + 1)/\(model.pageCount) · scroll" }
         if model.mode == .spread {
             let pages = model.visiblePages.map { "\($0 + 1)" }.joined(separator: "–")
@@ -341,6 +354,17 @@ private struct ReaderContent: View {
             .help("Night filter: invert, sepia or dim the pages (⌥⌘N cycles)")
             .accessibilityLabel("Night filter")
             .accessibilityValue(settings.nightFilter.title)
+            Button { translator.isOn.toggle() } label: {
+                Image(systemName: translator.isOn ? "character.bubble.fill" : "character.bubble")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundColor(Chika.cream)
+                    .frame(width: 38, height: 38)
+            }
+            .keyboardShortcut("t", modifiers: [.command, .shift])
+            .help(model.mode == .scroll ? "Translate works in Panels and Two pages" : "Translate the speech balloons (⇧⌘T); hover one for the original")
+            .accessibilityLabel("Translate")
+            .accessibilityValue(translator.isOn ? "On" : "Off")
+            .disabled(model.mode == .scroll)
             DirectionChip(rightToLeft: model.rightToLeft) { model.toggleDirection() }
             Button { openWindow(id: "peek", value: model.comicURL) } label: {
                 Image(systemName: "pip.enter")

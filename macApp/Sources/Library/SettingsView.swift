@@ -1,10 +1,13 @@
 import SwiftUI
+import Translation
 
 /// Chika settings / about (⌘,): the port of the iOS MenuView (itself Android's MenuScreen.kt).
 /// Holds the AMOLED theme toggle, the night filter, the default reading direction and the
 /// about/support section, over the ink ground with a faint crimson halftone.
 struct SettingsView: View {
     @EnvironmentObject private var settings: ChikaSettings
+    // The languages on-device translation can write, by identifier, for the Translate picker.
+    @State private var languages: [String] = []
 
     /// Points at the project repository.
     private static let repoURL = URL(string: "https://github.com/batunii/chika")!
@@ -15,6 +18,8 @@ struct SettingsView: View {
         let build = info?["CFBundleVersion"] as? String ?? "—"
         return "\(short) (\(build))"
     }
+
+    private static func name(_ id: String) -> String { Locale.current.localizedString(forIdentifier: id) ?? id }
 
     var body: some View {
         ZStack {
@@ -81,6 +86,27 @@ struct SettingsView: View {
                     .background(Chika.inkSoft)
                     .clipShape(RoundedCornerShape(cornerRadius: 6))
 
+                    Spacer().frame(height: 10)
+                    HStack(spacing: 12) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Translate into").font(.archivo(14, weight: 700)).foregroundColor(Chika.cream)
+                            Text("Speech balloons are read and translated on this Mac. ⇧⌘T in the reader.")
+                                .font(.archivo(10.5, weight: 500)).lineSpacing(3).foregroundColor(Chika.creamMuted)
+                        }
+                        Spacer(minLength: 0)
+                        Picker("Translate into", selection: $settings.translationTarget) {
+                            Text("System (\(Self.name(Locale.current.language.minimalIdentifier)))").tag("")
+                            ForEach(languages, id: \.self) { Text(Self.name($0)).tag($0) }
+                        }
+                        .labelsHidden()
+                        .fixedSize()
+                        .help("The language Translate writes the balloons in")
+                        .accessibilityLabel("Translate into")
+                    }
+                    .padding(.init(top: 12, leading: 16, bottom: 12, trailing: 10))
+                    .background(Chika.inkSoft)
+                    .clipShape(RoundedCornerShape(cornerRadius: 6))
+
                     Spacer().frame(height: 32)
 
                     // ---- About -------------------------------------------------------
@@ -131,6 +157,11 @@ struct SettingsView: View {
             }
         }
         .frame(width: 480, height: 620)
+        .task {
+            let ids = Set(await LanguageAvailability().supportedLanguages.map(\.minimalIdentifier))
+            // A choice the list no longer has stays pickable rather than blanking the picker.
+            languages = ids.union(settings.translationTarget.isEmpty ? [] : [settings.translationTarget]).sorted { Self.name($0) < Self.name($1) }
+        }
         .preferredColorScheme(.dark)
     }
 }
