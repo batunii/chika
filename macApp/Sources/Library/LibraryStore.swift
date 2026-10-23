@@ -30,14 +30,18 @@ final class LibraryStore: ObservableObject {
     private let dir: URL
     private let defaults: UserDefaults
     private var activeImports = 0
-    private var roots: [(url: URL, bookmark: Data, isFolder: Bool)] = []
+    private var roots: [(url: URL, bookmark: Data, isDirectory: Bool)] = []
     private var unresolved: [Data] = []
     private var stream: FSEventStreamRef?
     private static let bookmarksKey = "chika.bookmarks.v1"
-    /// Paths of the comics with a reader window open, in the order they opened, saved on every change.
-    private var openComics: [String] = []
-    /// Last session's open comics, until the first library window reopens them.
+    /// The comics with a reader window open, in the order they opened, saved on every change.
+    private var openComics: [URL] = []
+    /// Last session's open comics (ReadingProgress keys), until the first library window reopens them.
     private var toReopen: [String]
+    /// Reopened at launch and not yet shown: their windows leave the comics' recency alone.
+    private var reopening: Set<URL> = []
+    /// False for the app hosting the unit tests, so they never reopen or rewrite the user's session.
+    private let keepsSession: Bool
     private var quitting = false
     private var quitObserver: NSObjectProtocol?
     private static let openComicsKey = "chika.openComics.v1"
@@ -59,12 +63,17 @@ final class LibraryStore: ObservableObject {
         return types
     }
 
+    /// Whether this process is the host of the unit tests (it launches as the app, windows and all).
+    static let hostingTests = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+        || NSClassFromString("XCTestCase") != nil
+
     /// `directory` overrides the library folder and `defaults` the bookmark store (tests pass their own).
-    init(directory: URL? = nil, defaults: UserDefaults = .standard) {
+    init(directory: URL? = nil, defaults: UserDefaults = .standard, keepsSession: Bool = true) {
         dir = directory ?? FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("Comics", isDirectory: true)
         self.defaults = defaults
-        toReopen = defaults.stringArray(forKey: Self.openComicsKey) ?? []
+        self.keepsSession = keepsSession
+        toReopen = keepsSession ? defaults.stringArray(forKey: Self.openComicsKey) ?? [] : []
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         ReadingProgress.migrateLegacy(in: dir)
         // shortcut: a bookmark that no longer resolves (file deleted, drive unplugged) is kept but
@@ -72,6 +81,12 @@ final class LibraryStore: ObservableObject {
         for data in defaults.array(forKey: Self.bookmarksKey) as? [Data] ?? [] { resolve(data) }
         watch()
         refresh()
+        // Saved now, even empty: a comic gone since is never reopened later, nor one that takes its place.
+        if keepsSession {
+            let present = Set(keys.values)
+            toReopen = toReopen.filter(present.contains)
+            defaults.set(toReopen, forKey: Self.openComicsKey)
+        }
         // Windows may disappear while quitting; those are the ones to reopen, so they stay saved.
         quitObserver = NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification, object: nil,
                                                               queue: .main) { [weak self] _ in
@@ -91,7 +106,10 @@ final class LibraryStore: ObservableObject {
             .filter { ["cbz", "zip", "pdf"].contains($0.pathExtension.lowercased()) }
         sources = [:]
         for root in roots {
-            let found = root.isFolder ? Self.scan(root.url) : (fm.fileExists(atPath: root.url.path) ? [root.url] : [])
+            // A folder's kind is decided on every scan: an empty one later filled with images becomes one
+            // comic, and a comic's folder that gains an archive becomes a folder of comics.
+            let found = !root.isDirectory ? (fm.fileExists(atPath: root.url.path) ? [root.url] : [])
+                : FolderComic.isComic(root.url) ? [root.url] : Self.scan(root.url)
             for url in found where sources[url] == nil {
                 sources[url] = root.url
                 files.append(url)
@@ -158,24 +176,34 @@ final class LibraryStore: ObservableObject {
 
     // MARK: - Reopen at launch
 
-    // Paths, not bookmarks: every comic is an imported copy or under a bookmark resolved at launch.
+    /// A reader window appeared: the comic counts as just opened (unless reopened at launch, so Open Last
+    /// Comic and the library's order still see the last comic the user opened) and joins the session.
     func readerOpened(_ url: URL) {
-        openComics.removeAll { $0 == url.path }
-        openComics.append(url.path)
-        defaults.set(openComics, forKey: Self.openComicsKey)
+        if reopening.remove(url) == nil { ReadingProgress.markOpened(url) }
+        guard keepsSession else { return }
+        openComics.removeAll { $0 == url }
+        openComics.append(url)
+        saveOpenComics()
     }
 
     func readerClosed(_ url: URL) {
-        guard !quitting else { return }
-        openComics.removeAll { $0 == url.path }
-        defaults.set(openComics, forKey: Self.openComicsKey)
+        guard keepsSession, !quitting else { return }
+        openComics.removeAll { $0 == url }
+        saveOpenComics()
+    }
+
+    // Identities, not paths: a comic renamed or moved (or its watched folder) still reopens.
+    private func saveOpenComics() {
+        defaults.set(openComics.map { keys[$0] ?? ReadingProgress.key($0) }, forKey: Self.openComicsKey)
     }
 
     /// The comics whose readers were open at the last quit and are still in the library, in the order
     /// they opened. Once per launch: a library window opened later gets none.
     func takeComicsToReopen() -> [URL] {
         defer { toReopen = [] }
-        return toReopen.compactMap { path in comics.first { $0.path == path } }
+        let urls = toReopen.compactMap { key in comics.first { keys[$0] == key } }
+        reopening.formUnion(urls)
+        return urls
     }
 
     // MARK: - Series
@@ -300,19 +328,17 @@ final class LibraryStore: ObservableObject {
         }
         _ = url.startAccessingSecurityScopedResource()
         let fresh = stale ? (try? url.bookmarkData(options: .withSecurityScope, includingResourceValuesForKeys: nil, relativeTo: nil)) ?? data : data
-        // A folder of nothing but images is one comic, not a folder to watch.
-        let isFolder = (try? url.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true && !FolderComic.isComic(url)
-        roots.append((url, fresh, isFolder))
+        roots.append((url, fresh, (try? url.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true))
         if stale { saveBookmarks() }
     }
 
     private func saveBookmarks() { defaults.set(roots.map(\.bookmark) + unresolved, forKey: Self.bookmarksKey) }
 
-    /// One FSEvents stream over every watched folder (recursive), so new comics appear by themselves.
+    /// One FSEvents stream over every folder added (recursive), so new comics appear by themselves.
     private func watch() {
         if let stream { FSEventStreamStop(stream); FSEventStreamInvalidate(stream); FSEventStreamRelease(stream) }
         stream = nil
-        let folders = roots.filter(\.isFolder).map(\.url.path)
+        let folders = roots.filter(\.isDirectory).map(\.url.path)
         guard !folders.isEmpty else { return }
         var context = FSEventStreamContext(version: 0, info: Unmanaged.passUnretained(self).toOpaque(),
                                            retain: nil, release: nil, copyDescription: nil)
@@ -347,6 +373,7 @@ final class LibraryStore: ObservableObject {
         let staging = try fm.url(for: .itemReplacementDirectory, in: .userDomainMask, appropriateFor: dir, create: true)
         defer { try? fm.removeItem(at: staging) }
         let isFolder = (try? url.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory ?? false
+        var folderPages = 0
         let source = staging.appendingPathComponent("source").appendingPathExtension(url.pathExtension)
         var coordinationError: NSError?
         var copyError: Error?
@@ -356,6 +383,7 @@ final class LibraryStore: ObservableObject {
                     // Only its pages, as the folder reads in place: subfolders and other files stay behind.
                     let pages = try FolderComic.pages(in: readableURL)
                     guard !pages.isEmpty else { throw ImportError.noImages }
+                    folderPages = pages.count
                     try fm.createDirectory(at: source, withIntermediateDirectories: false)
                     for page in pages { try fm.copyItem(at: page, to: source.appendingPathComponent(page.lastPathComponent)) }
                 } else {
@@ -377,7 +405,10 @@ final class LibraryStore: ObservableObject {
         case .cbz, .pdf: try fm.moveItem(at: source, to: ready)
         case .unknown: throw ImportError.unsupported
         }
-        guard try ComicOpener.open(ready).pageCount > 0 else { throw ImportError.noImages }
+        let pageCount = try ComicOpener.open(ready).pageCount
+        guard pageCount > 0 else { throw ImportError.noImages }
+        // Every page copied from a folder must have made it into the archive.
+        guard !isFolder || pageCount == folderPages else { throw ImportError.noImages }
 
         let base = isFolder ? url.lastPathComponent : url.deletingPathExtension().lastPathComponent
         var n = 1

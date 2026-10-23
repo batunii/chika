@@ -55,8 +55,11 @@ the next issue). ⌘F toggles full screen, as does View > Enter Full Screen (⌃
 
 Quitting with reader windows open and launching again reopens them, each at its saved page and panel,
 whatever the system's "Close windows when quitting an application" setting. A comic deleted (or no
-longer in the library) since is skipped, and peek windows are not reopened. The list is saved as reader
-windows open and close (`chika.openComics.v1` in the app's defaults), so it also survives a crash.
+longer in the library) since is skipped, one renamed or moved (or its watched folder) is still found,
+and peek windows are not reopened. Reopening leaves the library's recency alone, so Open Last Comic
+still opens the comic you last opened. The list (each comic's file identity) is saved as reader windows
+open and close and again at launch (`chika.openComics.v1` in the app's defaults), so it also survives a
+crash. The app hosting the unit tests neither reopens nor saves it.
 
 ## Night filters
 
@@ -266,7 +269,9 @@ the search field has text.
   folder holding nothing but images (hidden files aside) is one comic rather than a folder to watch,
   and inside a watched folder each subfolder holding nothing but images shows as one comic too. A
   folder mixing images with anything else (a text file, an archive, a subfolder) is not a comic; its
-  archives are listed as usual.
+  archives are listed as usual. Only regular files are pages: a subfolder or a link is never one,
+  whatever its name. An added folder is looked at again whenever it changes, so an empty one filled
+  with images becomes a comic, and a folder of images that gains an archive becomes a folder of comics.
 - **Progress** is a SQLite table at `Library/Application Support/Chika/progress.sqlite` inside the
   container, keyed by file identity (volume UUID + inode), so renaming a comic keeps its place. The
   first launch copies the old UserDefaults progress over and leaves it for the Catalyst app.

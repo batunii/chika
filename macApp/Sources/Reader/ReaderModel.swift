@@ -120,7 +120,6 @@ final class ReaderModel: ObservableObject {
             slots = ReaderSlots(page: min(max(saved?.page ?? 0, 0), pageCount - 1),
                                 step: mode == .panels ? saved?.step ?? -1 : -1)
             state = .ready
-            ReadingProgress.markOpened(comicURL)   // bump recency so it sorts to the top of the library
             loadPage()
             BookPredetector.shared.add(comicURL)   // the pages not stored yet, in the background
         } catch {

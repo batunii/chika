@@ -72,6 +72,61 @@ final class LibraryStoreTests: XCTestCase {
         XCTAssertEqual(LibraryStore(directory: dir, defaults: ReadingProgress.defaults).takeComicsToReopen(), [x])
     }
 
+    func testTheTestHostNeitherReopensNorRecordsTheSession() async throws {
+        XCTAssertTrue(LibraryStore.hostingTests)   // so the app hosting these tests leaves the user's session alone
+        let store = LibraryStore(directory: dir, defaults: ReadingProgress.defaults)
+        await store.importComic(from: comic).value
+        let x = try XCTUnwrap(store.comics.first)
+        store.readerOpened(x)
+        let saved = ReadingProgress.defaults.stringArray(forKey: "chika.openComics.v1")
+
+        let host = LibraryStore(directory: dir, defaults: ReadingProgress.defaults, keepsSession: false)
+        XCTAssertEqual(host.takeComicsToReopen(), [])
+        host.readerOpened(x)
+        host.readerClosed(x)
+        XCTAssertEqual(ReadingProgress.defaults.stringArray(forKey: "chika.openComics.v1"), saved)
+    }
+
+    func testARenamedComicStillReopens() async throws {
+        let store = LibraryStore(directory: dir, defaults: ReadingProgress.defaults)
+        await store.importComic(from: comic).value
+        store.readerOpened(try XCTUnwrap(store.comics.first))
+        let renamed = dir.appendingPathComponent("Renamed.cbz")
+        try FileManager.default.moveItem(at: try XCTUnwrap(store.comics.first), to: renamed)
+
+        let reopened = LibraryStore(directory: dir, defaults: ReadingProgress.defaults).takeComicsToReopen()
+        XCTAssertEqual(reopened.map(\.lastPathComponent), ["Renamed.cbz"])
+    }
+
+    func testASessionWhoseComicsAreAllGoneIsClearedAtLaunch() async throws {
+        let store = LibraryStore(directory: dir, defaults: ReadingProgress.defaults)
+        await store.importComic(from: comic).value
+        let x = try XCTUnwrap(store.comics.first)
+        store.readerOpened(x)
+        try FileManager.default.removeItem(at: x)
+
+        _ = LibraryStore(directory: dir, defaults: ReadingProgress.defaults)   // launch with no library window
+        XCTAssertEqual(ReadingProgress.defaults.stringArray(forKey: "chika.openComics.v1"), [])
+    }
+
+    func testReopeningAtLaunchLeavesTheLastOpenedComicAlone() async throws {
+        let store = LibraryStore(directory: dir, defaults: ReadingProgress.defaults)
+        for _ in 0..<2 { await store.importComic(from: comic).value }
+        let x = try XCTUnwrap(store.comics.first { $0.lastPathComponent == "SyntheticManga.cbz" })
+        let y = try XCTUnwrap(store.comics.first { $0.lastPathComponent == "SyntheticManga 2.cbz" })
+        store.readerOpened(y)
+        store.readerOpened(x)
+        ReadingProgress.markOpened(y)   // y read last, x's window opened last
+
+        let relaunched = LibraryStore(directory: dir, defaults: ReadingProgress.defaults)
+        let last = { LibraryStore.lastOpened(relaunched.comics, keys: relaunched.keys, opened: ReadingProgress.openedMap()) }
+        XCTAssertEqual(last(), y)
+        for url in relaunched.takeComicsToReopen() { relaunched.readerOpened(url) }   // their windows appear
+        XCTAssertEqual(last(), y)
+        relaunched.readerOpened(x)   // opened again by the user: that counts
+        XCTAssertEqual(last(), x)
+    }
+
     func testLegacyProgressMigratesAndFollowsARename() async throws {
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         try FileManager.default.copyItem(at: comic, to: dir.appendingPathComponent("Old.cbz"))
@@ -286,6 +341,40 @@ final class LibraryStoreTests: XCTestCase {
         store.refresh()
         XCTAssertEqual(Set(store.comics.map(\.lastPathComponent)), ["One.cbz", "Pages"])
         XCTAssertEqual(try ComicOpener.open(try XCTUnwrap(store.comics.first { $0.lastPathComponent == "Pages" })).pageCount, 2)
+    }
+
+    func testFolderPagesAreRegularFilesOnly() async throws {
+        let folder = dir.appendingPathExtension("links").appendingPathComponent("Pages")
+        defer { try? FileManager.default.removeItem(at: folder.deletingLastPathComponent()) }
+        let pages = try makeImageFolder(folder)
+        let fm = FileManager.default
+        try fm.createDirectory(at: folder.appendingPathComponent("p3.jpg"), withIntermediateDirectories: false)
+        try fm.createSymbolicLink(at: folder.appendingPathComponent("p4.jpg"), withDestinationURL: folder.appendingPathComponent("p2.jpg"))
+
+        XCTAssertEqual(try FolderComic.pages(in: folder).map(\.lastPathComponent), ["p2.jpg", "p10.jpg"])
+        XCTAssertFalse(FolderComic.isComic(folder))   // a subfolder and a link are not pages
+        let store = LibraryStore(directory: dir, defaults: ReadingProgress.defaults)
+        await store.importComic(from: folder).value
+        XCTAssertNil(store.importError)
+        let copy = try ComicOpener.open(dir.appendingPathComponent("Pages.cbz"))
+        XCTAssertEqual(try (0..<copy.pageCount).map(copy.readPage), pages)
+    }
+
+    func testAnAddedFolderIsReclassifiedAsItsContentsChange() throws {
+        let root = dir.appendingPathExtension("grows")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = LibraryStore(directory: dir, defaults: ReadingProgress.defaults)
+        store.addInPlace(root)
+        XCTAssertEqual(store.comics, [])
+
+        _ = try makeImageFolder(root)   // filled with images: one comic
+        store.refresh()
+        XCTAssertEqual(store.comics.map(\.lastPathComponent), [root.lastPathComponent])
+
+        try FileManager.default.copyItem(at: comic, to: root.appendingPathComponent("One.cbz"))   // gains an archive: a folder of comics
+        store.refresh()
+        XCTAssertEqual(store.comics.map(\.lastPathComponent), ["One.cbz"])
     }
 
     func testComicInfoGroupsSeriesAndFindsTheNextIssue() async throws {

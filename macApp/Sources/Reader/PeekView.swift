@@ -84,8 +84,9 @@ private struct PeekContent: View {
         .focusable()
         .focusEffectDisabled()
         .focused($focused)
-        .onAppear { focused = true }
-        .onChange(of: appearsActive) { if appearsActive { ShortcutTarget.reader = model } }   // as the reader does
+        .onAppear { focused = true; ShortcutTarget.windowOpened(model) }
+        .onDisappear { ShortcutTarget.windowClosed(model) }
+        .onChange(of: appearsActive) { if appearsActive { ShortcutTarget.windowActivated(model) } }   // as the reader does
         .onCopyCommand { model.copyItems(peek: true) }   // Edit > Copy and ⌘C: the panel shown here
         .onKeyPress(.leftArrow) { model.advance(by: -1); return .handled }
         .onKeyPress(.rightArrow) { model.advance(by: 1); return .handled }

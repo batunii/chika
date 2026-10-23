@@ -16,7 +16,7 @@ struct ReaderView: View {
 
     var body: some View {
         ReaderContent(model: readers.model(for: comicURL, settings: settings))
-            .onAppear { readers.attach(comicURL); ReadingProgress.markOpened(comicURL); library.readerOpened(comicURL) }
+            .onAppear { readers.attach(comicURL); library.readerOpened(comicURL) }
             .onDisappear { readers.detach(comicURL); library.readerClosed(comicURL) }
     }
 }
@@ -132,9 +132,10 @@ private struct ReaderContent: View {
             focused = true
             ShortcutTarget.library = library
             ShortcutTarget.windows = (openWindow, dismissWindow)
+            ShortcutTarget.windowOpened(model)
         }
         // The reader last in front is the one Shortcuts' actions step.
-        .onChange(of: appearsActive, initial: true) { if appearsActive { ShortcutTarget.reader = model } }
+        .onChange(of: appearsActive, initial: true) { if appearsActive { ShortcutTarget.windowActivated(model) } }
         .onCopyCommand { editing ? [] : model.copyItems() }   // Edit > Copy and ⌘C; not the hidden page behind the editor
         .onKeyPress(.leftArrow) { step(-1); return .handled }
         .onKeyPress(.rightArrow) { step(1); return .handled }
@@ -168,7 +169,10 @@ private struct ReaderContent: View {
         }
         // The peek holds auto-advance while the editor is open (and not after this window closes mid-edit).
         .onChange(of: editing) { model.editingPanels = editing }
-        .onDisappear { model.editingPanels = false; speaker.isOn = false; translator.stop() }
+        .onDisappear {
+            model.editingPanels = false; speaker.isOn = false; translator.stop()
+            ShortcutTarget.windowClosed(model)
+        }
         // Translate (and Read aloud's text) follows the pages on screen once they (and in Panels mode their panels) are in.
         .onReceive(NSWorkspace.shared.publisher(for: \.isVoiceOverEnabled)) { voiceOver = $0 }
         // VoiceOver reads the balloons too, so their text is read with Translate and Read aloud off.

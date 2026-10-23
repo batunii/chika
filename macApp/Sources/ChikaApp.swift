@@ -5,7 +5,7 @@ struct ChikaApp: App {
     @StateObject private var settings = ChikaSettings()
     @StateObject private var readers = ReaderModels()
     // App-wide: one set of bookmarks and one folder watcher, shared by every window.
-    @StateObject private var library = LibraryStore()
+    @StateObject private var library = LibraryStore(keepsSession: !LibraryStore.hostingTests)
 
     var body: some Scene {
         WindowGroup("Chika") { LibraryView().environmentObject(settings).environmentObject(readers).environmentObject(library) }

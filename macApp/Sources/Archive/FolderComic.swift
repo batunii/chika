@@ -15,11 +15,22 @@ final class FolderComic: ComicPages {
     func readPage(_ index: Int) throws -> Data { try Data(contentsOf: pages[index]) }
 
     static func pages(in folder: URL) throws -> [URL] {
-        ImageFolder.pages(try FileManager.default.contentsOfDirectory(atPath: folder.path)).map { folder.appendingPathComponent($0) }
+        ImageFolder.pages(try entries(folder).filter(\.isFile).map(\.name)).map { folder.appendingPathComponent($0) }
     }
 
     /// Whether `folder` holds only images (hidden files aside), so it is one comic rather than a folder of them.
+    /// A subfolder or link is never a page, whatever its name.
     static func isComic(_ folder: URL) -> Bool {
-        ImageFolder.isComic((try? FileManager.default.contentsOfDirectory(atPath: folder.path)) ?? [])
+        guard let entries = try? entries(folder),
+              !entries.contains(where: { !$0.isFile && !$0.name.hasPrefix(".") }) else { return false }
+        return ImageFolder.isComic(entries.map(\.name))
+    }
+
+    /// The folder's entries and whether each is a regular file: a folder named "02.jpg" would be copied
+    /// whole on import, and a link imports as a link entry the archive reader drops.
+    private static func entries(_ folder: URL) throws -> [(name: String, isFile: Bool)] {
+        try FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: [.isRegularFileKey]).map {
+            ($0.lastPathComponent, (try? $0.resourceValues(forKeys: [.isRegularFileKey]))?.isRegularFile == true)
+        }
     }
 }

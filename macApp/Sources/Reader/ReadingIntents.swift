@@ -6,11 +6,25 @@ import SwiftUI
 /// as they appear.
 @MainActor
 enum ShortcutTarget {
-    static weak var reader: ReaderModel?
+    /// One entry per open reader or peek window, the one last in front at the end. Tracked by the windows
+    /// rather than held weakly: pending work can keep a closed comic's model alive.
+    private(set) static var shown: [ReaderModel] = []
+    static var reader: ReaderModel? { shown.last }
     static weak var library: LibraryStore?
     static var windows: (open: OpenWindowAction, dismiss: DismissWindowAction)?
     /// The comics with a peek window open.
     static var peeks: Set<URL> = []
+
+    static func windowOpened(_ model: ReaderModel) { shown.append(model) }
+
+    static func windowActivated(_ model: ReaderModel) {
+        if let i = shown.lastIndex(where: { $0 === model }) { shown.append(shown.remove(at: i)) }
+    }
+
+    /// The window in front before this one becomes the target again; none once the last has closed.
+    static func windowClosed(_ model: ReaderModel) {
+        if let i = shown.lastIndex(where: { $0 === model }) { shown.remove(at: i) }
+    }
 
     static func frontReader() throws -> ReaderModel {
         guard let reader else { throw ShortcutError("No comic is open in Chika.") }

@@ -46,16 +46,21 @@ final class ReaderAdvanceTests: XCTestCase {
         let model = ReaderModel(comicURL: comic, settings: ChikaSettings())
         let deadline = Date.now + 10
         while model.state == .loading, Date.now < deadline { try await Task.sleep(for: .milliseconds(20)) }
-        let front = ShortcutTarget.reader
-        defer { ShortcutTarget.reader = front }
+        let other = ReaderModel(comicURL: comic, settings: ChikaSettings())
 
-        ShortcutTarget.reader = model
+        ShortcutTarget.windowOpened(model)
+        ShortcutTarget.windowOpened(other)
+        ShortcutTarget.windowActivated(model)   // the first window back in front
         _ = try await NextPanelIntent().perform()
         XCTAssertEqual(model.slots.page, 1)
         _ = try await PreviousPanelIntent().perform()
         XCTAssertEqual(model.slots.page, 0)
 
-        ShortcutTarget.reader = nil
+        // Closing it falls back to the other window; closing that leaves none, though both models live on here.
+        ShortcutTarget.windowClosed(model)
+        XCTAssertTrue(ShortcutTarget.reader === other)
+        ShortcutTarget.windowClosed(other)
+        XCTAssertNil(ShortcutTarget.reader)
         do { _ = try await NextPanelIntent().perform(); XCTFail("stepped with no reader") } catch is ShortcutError {}
     }
 
