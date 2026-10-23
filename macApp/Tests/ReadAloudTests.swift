@@ -55,4 +55,28 @@ final class ReadAloudTests: XCTestCase {
         XCTAssertEqual(steps, 0)
         XCTAssertNil(speaker.current)
     }
+
+    // A manual step moves the model before `update` hears of it: the old view's wait must not step again.
+    func testAViewNoLongerOnScreenNeverStepsOn() async throws {
+        let speaker = BalloonSpeaker()
+        var steps = 0
+        speaker.onDone = { steps += 1 }
+        speaker.isCurrent = { $0 == AnyHashable(2) }   // the reader already moved on to view 2
+        speaker.isOn = true
+        speaker.update(key: 1, lines: [], wait: 0.05)
+        try await Task.sleep(for: .milliseconds(200))
+        XCTAssertEqual(steps, 0)
+        speaker.update(key: 2, lines: [], wait: 0.05)   // the new view still waits and steps on
+        try await Task.sleep(for: .milliseconds(200))
+        XCTAssertEqual(steps, 1)
+    }
+
+    // The system voice follows Spoken Content's language, so a known language always gets its own voice.
+    func testAKnownLanguageGetsItsOwnVoiceEvenTheUsersOwn() {
+        let speaker = BalloonSpeaker()
+        XCTAssertNil(speaker.voice(nil))
+        let own = Locale.current.language.minimalIdentifier
+        XCTAssertTrue(speaker.voice(own).map { BalloonText.sameLanguage($0.language, own) } ?? false)
+        XCTAssertTrue(speaker.voice("en").map { BalloonText.sameLanguage($0.language, "en") } ?? false)
+    }
 }

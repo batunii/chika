@@ -145,7 +145,7 @@ recognition and stored text, so a page read for one is not read again for the ot
 when Translate is on and has one, else the text off the page, in a voice for that text's language (the
 system voice when there is none). The balloon being spoken is outlined. In Panels mode it reads the
 balloons of the panel on screen (each balloon belongs to the panel it overlaps most), in Two pages
-every balloon of the spread, in reading order; then it steps on like the arrow key and carries on, to
+every balloon of the spread, panel by panel (the stored or hand-drawn panels) in reading order; then it steps on like the arrow key and carries on, to
 the end of the comic. A panel with no text gets about 1.5 s, a whole-page view a short beat. Stepping
 by hand cuts the balloon off and carries on from the new place. Settings (⌘,) sets the speed.
 
@@ -154,7 +154,7 @@ by hand cuts the balloon off and carries on from the new place. Settings (⌘,) 
 With VoiceOver on, the page in Panels and Two pages says where you are ("Page 4 of 20, panel 2 of
 5", "Pages 4 and 5 of 20") and the arrow keys read on. Inside it, the speech balloons of the view on
 screen are elements in reading order, the same ones Read aloud would speak: the panel's balloons in
-Panels mode, every balloon on a whole page or a spread. Each says the translation when Translate is on
+Panels mode, every balloon on a whole page or a spread, panel by panel. Each says the translation when Translate is on
 and has one (with the original as its hint), else the text off the page. A view with no text says
 "no text" once it has been read. VoiceOver alone is enough to have the balloons read (with Translate and
 Read aloud off), using the same stored text; nothing changes on screen.

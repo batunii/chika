@@ -57,6 +57,14 @@ public enum BalloonText {
         return PanelOrdering.order(balloons.filter { owner(of: $0, in: regions) == step }, rightToLeft: rightToLeft)
     }
 
+    /// Every balloon of a whole page, panel by panel in the panels' reading order (`regions`, already
+    /// ordered for the direction), then in reading order within each panel, so a tall panel's balloons
+    /// are all read before the next panel's.
+    public static func balloons(_ balloons: [Panel], of regions: [Panel], rightToLeft: Bool) -> [Panel] {
+        let regions = regions.isEmpty ? [.fullPage] : regions
+        return regions.indices.flatMap { Self.balloons(balloons, inRegion: $0, of: regions, rightToLeft: rightToLeft) }
+    }
+
     private static func owner(of balloon: Panel, in regions: [Panel]) -> Int {
         func rank(_ r: Panel) -> (Float, Float) {
             let overlap = max(min(balloon.right, r.right) - max(balloon.left, r.left), 0)

@@ -24,13 +24,14 @@ enum PageAccessibility {
     }
 
     /// A page's balloons in the view on screen, in reading order: the panel `step` of `regions` (each
-    /// balloon belongs to one panel, as for Read aloud), every balloon when `step` is nil (a whole page).
+    /// balloon belongs to one panel, as for Read aloud), every balloon panel by panel when `step` is nil
+    /// (a whole page; `regions` in the direction's reading order).
     /// Labelled like Read aloud speaks them: the translation when Translate is on and has one, else the
     /// text off the page; balloons without letters are left out.
     @MainActor static func elements(_ read: [BalloonTranslator.Balloon], step: Int?, of regions: [Panel], rightToLeft: Bool,
                                     translate: Bool, target: Locale.Language) -> [Element] {
-        let boxes = BalloonText.balloons(read.map(\.box), inRegion: step ?? 0, of: step == nil ? [.fullPage] : regions,
-                                         rightToLeft: rightToLeft)
+        let boxes = step.map { BalloonText.balloons(read.map(\.box), inRegion: $0, of: regions, rightToLeft: rightToLeft) }
+            ?? BalloonText.balloons(read.map(\.box), of: regions, rightToLeft: rightToLeft)
         return boxes.compactMap { box in
             guard let balloon = read.first(where: { $0.box == box }),
                   let line = BalloonSpeaker.line(balloon, page: 0, translate: translate, target: target) else { return nil }

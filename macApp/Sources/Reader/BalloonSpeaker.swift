@@ -25,6 +25,10 @@ final class BalloonSpeaker: NSObject, ObservableObject, AVSpeechSynthesizerDeleg
     var rate = AVSpeechUtteranceDefaultSpeechRate
     /// The view's lines are done (or it had none and its wait is over): the reader steps on.
     var onDone: () -> Void = {}
+    /// Whether `key` is still the view on screen. A manual step (here or in the peek window) moves the
+    /// model at once but reaches `update` only on SwiftUI's next pass; until then the old view must
+    /// neither speak on nor step again, or the view just chosen is skipped.
+    var isCurrent: (AnyHashable) -> Bool = { _ in true }
 
     private let synthesizer = AVSpeechSynthesizer()
     private var key: AnyHashable?
@@ -72,6 +76,7 @@ final class BalloonSpeaker: NSObject, ObservableObject, AVSpeechSynthesizerDeleg
                 try? await Task.sleep(for: .seconds(wait))
                 guard !Task.isCancelled else { return }
                 beat = nil
+                guard let key = self.key, isCurrent(key) else { return }
                 done()
             }
         } else {
@@ -100,9 +105,10 @@ final class BalloonSpeaker: NSObject, ObservableObject, AVSpeechSynthesizerDeleg
         onDone()
     }
 
-    /// A voice for the language, nil (the system voice) for the system's own language or one with no voice.
-    private func voice(_ language: String?) -> AVSpeechSynthesisVoice? {
-        guard let language, !BalloonText.sameLanguage(language, Locale.current.language.minimalIdentifier) else { return nil }
+    /// A voice for the language, nil (the system voice) when it is unknown or has no voice. Never nil for
+    /// the user's own language: the system voice follows the separate Spoken Content language.
+    func voice(_ language: String?) -> AVSpeechSynthesisVoice? {
+        guard let language else { return nil }
         if let known = voices[language] { return known }
         let found = AVSpeechSynthesisVoice(language: language)
             ?? AVSpeechSynthesisVoice.speechVoices().first { BalloonText.sameLanguage($0.language, language) }
@@ -132,6 +138,7 @@ final class BalloonSpeaker: NSObject, ObservableObject, AVSpeechSynthesizerDeleg
             guard self.isOn, id == self.spoken else { return }
             self.spoken = nil
             self.current = nil
+            guard let key = self.key, self.isCurrent(key) else { return }
             self.speakNext()
         }
     }

@@ -68,4 +68,12 @@ struct BalloonTextTests {
         #expect(BalloonText.balloons([gap], inRegion: 2, of: [left, right], rightToLeft: false).isEmpty)
         #expect(BalloonText.balloons([gap], inRegion: 0, of: [.fullPage], rightToLeft: false) == [gap])
     }
+
+    @Test func aWholePageReadsPanelByPanel() {
+        // A tall left panel (A over B) beside two stacked right panels (C, D): row order would be A, C, B, D.
+        let tall = Panel(0, 0, 0.5, 1), upper = Panel(0.5, 0, 1, 0.5), lower = Panel(0.5, 0.5, 1, 1)
+        let a = Panel(0.1, 0.1, 0.3, 0.2), b = Panel(0.1, 0.6, 0.3, 0.7), c = Panel(0.6, 0.15, 0.9, 0.25), d = Panel(0.6, 0.65, 0.9, 0.75)
+        #expect(BalloonText.balloons([d, c, b, a], of: [tall, upper, lower], rightToLeft: false) == [a, b, c, d])
+        #expect(BalloonText.balloons([d, c, b, a], of: [], rightToLeft: false) == [a, c, b, d])   // no panels: the whole page
+    }
 }

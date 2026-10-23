@@ -29,10 +29,12 @@ final class VoiceOverTests: XCTestCase {
         XCTAssertNil(panel.last?.hint)
         // Translate off: the text off the page.
         XCTAssertEqual(PageAccessibility.elements(read, step: 0, of: regions, rightToLeft: false, translate: false, target: english).first?.label, "今日は")
-        // A whole page reads every balloon with letters, the right-hand side first when reading right to left.
-        let page = PageAccessibility.elements(read, step: nil, of: regions, rightToLeft: true, translate: true, target: english)
-        XCTAssertEqual(Set(page.map(\.label)), ["Today", "Second", "Other panel"])
-        XCTAssertEqual(page.first?.label, "Other panel")
+        // A whole page reads every balloon with letters panel by panel (the left panel's low one before the
+        // right panel's high one), the right-hand panel first when reading right to left.
+        XCTAssertEqual(PageAccessibility.elements(read, step: nil, of: regions, rightToLeft: false, translate: true, target: english)
+                        .map(\.label), ["Today", "Second", "Other panel"])
+        XCTAssertEqual(PageAccessibility.elements(read, step: nil, of: regions.reversed(), rightToLeft: true, translate: true, target: english)
+                        .map(\.label), ["Other panel", "Today", "Second"])
         XCTAssertTrue(PageAccessibility.elements(read, step: 1, of: [regions[0]], rightToLeft: false, translate: true, target: english).isEmpty)
     }
 }

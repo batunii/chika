@@ -153,6 +153,7 @@ private struct ReaderContent: View {
                 // Blocked here is the end of the book: the view was in, so it is not waiting for detection.
                 if model.advance(by: 1) == .blocked { speaker?.isOn = false }
             }
+            speaker.isCurrent = { [self] key in key == AnyHashable(aloudKey) }
         }
     }
 
@@ -163,20 +164,23 @@ private struct ReaderContent: View {
 
     /// The view Read aloud is on: a new one interrupts the speech.
     private var aloudKey: [AnyHashable] {
+        // The direction too: a flip reorders the lines, so the view starts over rather than skip or repeat one.
         [model.mode, model.visiblePages, model.mode == .panels ? model.slots.step : 0,
-         model.mode == .panels ? model.slots.camera : .fullPage, editing]
+         model.mode == .panels ? model.slots.camera : .fullPage, editing, model.rightToLeft]
     }
 
     /// Read aloud's lines for the view on screen in reading order: in Panels mode the balloons of the
     /// panel on screen (none on a whole-page slot, its panels read them), in Two pages every balloon of
-    /// each page. Nil until the view, its panels and its balloons' text are in, or while editing panels.
+    /// each page, panel by panel. Nil until the view, its panels and its balloons' text are in, or while
+    /// editing panels. A page that would not decode has no text, so its view waits and steps on.
     private var aloudLines: [BalloonSpeaker.Line]? {
-        guard speaker.isOn, !editing, !model.waitingForPage, !translator.reading, !model.pageImages.isEmpty else { return nil }
+        guard speaker.isOn, !editing, !model.waitingForPage, !translator.reading, model.imagePages == model.visiblePages else { return nil }
         let panels = model.mode == .panels
         return model.visiblePages.flatMap { page in
             let read = translator.balloons[page] ?? []
-            let boxes = BalloonText.balloons(read.map(\.box), inRegion: panels ? model.slots.step : 0,
-                                             of: panels ? model.slots.regions ?? [] : [.fullPage], rightToLeft: model.rightToLeft)
+            let boxes = panels
+                ? BalloonText.balloons(read.map(\.box), inRegion: model.slots.step, of: model.slots.regions ?? [], rightToLeft: model.rightToLeft)
+                : BalloonText.balloons(read.map(\.box), of: wholePagePanels(page), rightToLeft: model.rightToLeft)
             return boxes.compactMap { box in
                 read.first { $0.box == box }.flatMap {
                     BalloonSpeaker.line($0, page: page, translate: translator.isOn, target: settings.targetLanguage)
@@ -196,8 +200,14 @@ private struct ReaderContent: View {
         guard !editing else { return [] }
         let onPanel = model.mode == .panels && model.slots.onPanel
         return PageAccessibility.elements(translator.balloons[page] ?? [], step: onPanel ? model.slots.step : nil,
-                                          of: model.slots.regions ?? [], rightToLeft: model.rightToLeft,
+                                          of: wholePagePanels(page), rightToLeft: model.rightToLeft,
                                           translate: translator.isOn, target: settings.targetLanguage)
+    }
+
+    /// A page's panels in reading order, so its balloons are read panel by panel: the panels on screen in
+    /// Panels mode, the stored (or hand-drawn) ones in Two pages; the whole page when none are known.
+    private func wholePagePanels(_ page: Int) -> [Panel] {
+        (model.mode == .panels ? model.slots.regions : model.knownRegions(page)) ?? [.fullPage]
     }
 
     /// VoiceOver's label for the page: where the reader is, and whether the view has no text once it is read.

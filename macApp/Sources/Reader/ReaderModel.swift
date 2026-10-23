@@ -134,14 +134,13 @@ final class ReaderModel: ObservableObject {
     /// scrubbing fast.
     private func loadPage() {
         guard let loader else { return }
+        // Hand-drawn panels in Two pages too: Read aloud and VoiceOver read each page's balloons panel by panel.
+        if mode != .scroll { for page in visiblePages { overrides[page] = ReadingProgress.panelOverride(comicURL, page: page) } }
         // Known panels apply at once (resolving a backward turn's outro); unknown ones stay nil and
         // block stepping until detection lands. A bookmark's panel waits for its page's image, so the
         // camera never frames it on the page still on screen.
-        if mode == .panels {
-            overrides[slots.page] = ReadingProgress.panelOverride(comicURL, page: slots.page)
-            if let known = knownRegions(slots.page),
-               slots.step == -1 || slots.step == ReaderSlots.outroSentinel { slots.setRegions(known) }
-        }
+        if mode == .panels, let known = knownRegions(slots.page),
+           slots.step == -1 || slots.step == ReaderSlots.outroSentinel { slots.setRegions(known) }
         detecting = false
         pageAlpha = 0.35   // fades up to 1 once the page renders
 
@@ -177,7 +176,7 @@ final class ReaderModel: ObservableObject {
 
     /// A page's panels without running the detector: drawn by hand, cached, or stored by an earlier
     /// detection (the reader's or the background pre-detection's).
-    private func knownRegions(_ page: Int) -> [Panel]? {
+    func knownRegions(_ page: Int) -> [Panel]? {
         if let known = overrides[page] ?? panelCache[page] { return known }
         panelCache[page] = ReadingProgress.detection(comicURL, page: page, rtl: rightToLeft)?.regions
         return panelCache[page]
