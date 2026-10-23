@@ -23,6 +23,7 @@ struct ChikaApp: App {
         WindowGroup("Reader", id: "reader", for: URL.self) { $url in
             if let url { ReaderView(comicURL: url).environmentObject(settings).environmentObject(readers).environmentObject(library) }
         }
+        .defaultSize(width: 820, height: 900)   // portrait, for pages; the system fits it to the screen
         .handlesExternalEvents(matching: [])
         // LibraryStore reopens the readers open at quit itself, whatever the system's "close windows when
         // quitting" setting, and never one whose comic is gone; SwiftUI's restoration would do neither.

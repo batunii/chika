@@ -228,9 +228,9 @@ private extension View {
     }
 }
 
-/// The peek's window, held weakly: the window owns this view's state, so a strong hold would keep every
-/// closed peek alive and resizing with the shared model.
-private final class WeakWindow {
+/// A view's window (the peek's, a reader's), held weakly: the window owns the view's state, so a strong
+/// hold would keep every closed window's view alive (and a peek resizing with the shared model).
+final class WeakWindow {
     weak var value: NSWindow?
 }
 

@@ -20,4 +20,14 @@ struct PageJumpTests {
         #expect(PageJump.page("", pageCount: 120) == nil)
         #expect(PageJump.page("3", pageCount: 0) == nil)
     }
+
+    @Test func aScrubberStepGoesToItsPageOrTheSpreadBefore() {
+        #expect(PageJump.scrubbed(to: 4.2, visible: [3]) == 4)
+        #expect(PageJump.scrubbed(to: 3.4, visible: [3]) == nil)   // not a page away yet
+        #expect(PageJump.scrubbed(to: 9, visible: [6, 7]) == 9)
+        #expect(PageJump.scrubbed(to: 6, visible: [6, 7]) == 5)    // back a spread, not onto the one on screen
+        #expect(PageJump.scrubbed(to: 7, visible: [6, 7]) == nil)
+        #expect(PageJump.scrubbed(to: 0, visible: [0, 1]) == nil)  // nothing before the first
+        #expect(PageJump.scrubbed(to: 2, visible: []) == nil)
+    }
 }

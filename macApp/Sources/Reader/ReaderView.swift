@@ -51,6 +51,13 @@ private struct ReaderContent: View {
     @State private var typedPage = ""
     /// Counts digit presses, so each one restarts the entry's timeout even when the digits stay the same.
     @State private var typedKeys = 0
+    // A short note in place of the status line ("Copied", "End of comic"); it goes 1.5 s after the last one.
+    @State private var flash: String?
+    @State private var flashes = 0
+    // The bars' heights: the page and its panels are fitted between them, not under them.
+    @State private var topInset: CGFloat = 0
+    @State private var bottomInset: CGFloat = 0
+    @State private var window = WeakWindow()
     @StateObject private var translator = BalloonTranslator()
     @StateObject private var speaker = BalloonSpeaker()
     @State private var voiceOver = NSWorkspace.shared.isVoiceOverEnabled
@@ -81,8 +88,10 @@ private struct ReaderContent: View {
                 }
             }
         }
+        // Room for the folded top bar with a readable title, and for a page between the bars.
+        .frame(minWidth: 640, minHeight: 480)
         .overlay(alignment: .top) { if isReady && !editing { topBar } }
-        .overlay(alignment: .bottom) { if isReady && !editing && model.pageCount > 1 { bottomBar } }
+        .overlay(alignment: .bottom) { if isReady && !editing { bottomBar } }
         .overlay(alignment: .topLeading) {
             if !isReady {
                 Button { dismiss() } label: {
@@ -95,14 +104,23 @@ private struct ReaderContent: View {
             }
         }
         // Page turns have no visible button; these invisible ones carry ⌘[ / ⌘], the modes, ⌥⌘N, ⌘D,
-        // ⇧⌘E and ⌘E (the More menu shows the last two but a menu's shortcuts may not fire until it has
-        // been opened). Off while editing panels, so the page under the editor stays put.
+        // ⇧⌘E and ⌘E, and the top bar's ⌘0, ⇧⌘T, ⇧⌘R and ⇧⌘P (the More menu shows some, a narrow window
+        // folds the others into it, and a menu's shortcuts may not fire until it has been opened). Off
+        // while editing panels, so the page under the editor stays put.
         .background {
             Group {
                 Button("Previous page") { model.turnPage(next: false) }
                     .keyboardShortcut("[", modifiers: .command)
                 Button("Next page") { model.turnPage(next: true) }
                     .keyboardShortcut("]", modifiers: .command)
+                Button("Show whole page") { wholePage() }
+                    .keyboardShortcut("0", modifiers: .command)
+                    .disabled(model.mode != .panels)
+                Button("Translate") { translator.isOn.toggle() }
+                    .keyboardShortcut("t", modifiers: [.command, .shift])
+                    .disabled(model.mode == .scroll)
+                Button("Peek") { openPeek() }
+                    .keyboardShortcut("p", modifiers: [.command, .shift])
                 ForEach(Array(ReadingMode.allCases.enumerated()), id: \.element) { i, mode in
                     Button(mode.title) { model.setMode(mode) }
                         .keyboardShortcut(KeyEquivalent(Character("\(i + 1)")), modifiers: .command)
@@ -127,6 +145,7 @@ private struct ReaderContent: View {
                 .opacity(0)
                 .accessibilityHidden(true)
         }
+        .background(ReaderWindowConfigurator(comicURL: model.comicURL, window: window))
         .navigationTitle(model.title)
         .focusable()
         .focusEffectDisabled()
@@ -138,8 +157,16 @@ private struct ReaderContent: View {
             ShortcutTarget.windowOpened(model)
         }
         // The reader last in front is the one Shortcuts' actions step.
-        .onChange(of: appearsActive, initial: true) { if appearsActive { ShortcutTarget.windowActivated(model) } }
-        .onCopyCommand { editing ? [] : model.copyItems() }   // Edit > Copy and ⌘C; not the hidden page behind the editor
+        .onChange(of: appearsActive, initial: true) {
+            if appearsActive { ShortcutTarget.windowActivated(model) }
+            // A drag cut short by the window going to the back never ends, and the thumb would stop following the page.
+            else if scrubbing { scrubbing = false; scrub = Double(lastVisiblePage) }
+        }
+        .onCopyCommand {   // Edit > Copy and ⌘C; not the hidden page behind the editor
+            let items = editing ? [] : model.copyItems()
+            if !items.isEmpty { show("Copied") }
+            return items
+        }
         .onKeyPress(.leftArrow) { step(-1); return .handled }
         .onKeyPress(.rightArrow) { step(1); return .handled }
         .onKeyPress(.space, phases: .down) { press in
@@ -175,9 +202,15 @@ private struct ReaderContent: View {
             guard !typedPage.isEmpty, (try? await Task.sleep(for: .seconds(1.5))) != nil else { return }
             typedPage = ""
         }
+        .task(id: flashes) {
+            guard flash != nil, (try? await Task.sleep(for: .seconds(1.5))) != nil else { return }
+            flash = nil
+        }
         // Any step or page change lands un-zoomed, like Android.
         .onChange(of: [model.slots.page, model.slots.step]) {
             withAnimation(ReaderModel.cameraTween) { resetZoom() }
+            // VoiceOver does not read the page's label again when it changes, so each step says where it landed.
+            if voiceOver && model.mode != .scroll && !editing { AccessibilityNotification.Announcement(pageAccessibilityLabel).post() }
         }
         // The peek holds auto-advance while the editor is open (and not after this window closes mid-edit).
         .onChange(of: editing) { model.editingPanels = editing }
@@ -216,6 +249,20 @@ private struct ReaderContent: View {
     private func toggleReadAloud() {
         guard model.mode != .scroll else { NSSound.beep(); return }
         speaker.isOn.toggle()
+    }
+
+    private func openPeek() { openWindow(id: "peek", value: model.comicURL) }
+
+    /// Says `note` in place of the status line for a moment (and to VoiceOver).
+    private func show(_ note: String) {
+        flash = note
+        flashes += 1
+        if voiceOver { AccessibilityNotification.Announcement(note).post() }
+    }
+
+    /// A step in Panels or Two pages; one past the end says so rather than doing nothing.
+    private func advance(_ delta: Int) {
+        if model.advance(by: delta) == .blocked, delta > 0, model.onLastPage, !model.waitingForPage { show("End of comic") }
     }
 
     /// The view Read aloud is on: a new one interrupts the speech.
@@ -283,8 +330,10 @@ private struct ReaderContent: View {
     /// One reading step: a panel, a spread, or (scroll mode) most of a screen.
     private func step(_ delta: Int) {
         guard !editing else { return }
-        guard model.mode == .scroll else { model.advance(by: delta); return }
-        let target = min(max(0, (scrollTarget ?? scrollY) + CGFloat(delta) * viewport * 0.85), max(scrollEnd, 0))
+        guard model.mode == .scroll else { advance(delta); return }
+        let from = scrollTarget ?? scrollY
+        if delta > 0, from >= scrollEnd - 1 { show("End of comic"); return }
+        let target = min(max(0, from + CGFloat(delta) * viewport * 0.85), max(scrollEnd, 0))
         scrollTarget = target
         withAnimation(.easeOut(duration: 0.25)) { scroll.scrollTo(y: target) }
     }
@@ -312,9 +361,13 @@ private struct ReaderContent: View {
     }
 
     private func pagedBody(size: CGSize) -> some View {
-        Group {
-            if model.mode == .spread { spreadPages(size: size) } else { panelPage(size: size) }
+        // The page, a framed panel or a spread is fitted between the bars, so none of it starts out under
+        // them (zoomed or panned it may still pass beneath).
+        let area = CGSize(width: size.width, height: max(size.height - topInset - bottomInset, 1))
+        return Group {
+            if model.mode == .spread { spreadPages(size: area) } else { panelPage(size: area) }
         }
+        .offset(y: topInset)
         // topLeading alignment is load-bearing: the bitmap-sized Image makes the ZStack oversized,
         // and a default (.center) frame alignment would shift the image's local origin — the
         // CameraFraming transform assumes local (0,0) sits at the container's top-left corner.
@@ -324,6 +377,7 @@ private struct ReaderContent: View {
         // Reticle framing brackets — always drawn while reading (independent of chrome), crimson.
         .overlay { if model.image != nil {
             Reticle(color: Chika.crimson.opacity(0.45), inset: 6, length: 16, stroke: 2).padding(6)
+                .padding(.top, topInset).padding(.bottom, bottomInset)
         } }
         .contentShape(Rectangle())
         // Zoomed in, a two-finger swipe is left alone rather than throwing the zoom away with the page.
@@ -344,7 +398,7 @@ private struct ReaderContent: View {
                     // The comic floats over the background, clamped so it can't be lost off-screen.
                     let raw = CGSize(width: steadyPan.width + drag.translation.width,
                                      height: steadyPan.height + drag.translation.height)
-                    pan = clampPan(raw, viewSize: size)
+                    pan = clampPan(raw, viewSize: area)
                 }
                 .onEnded { _ in steadyPan = pan }   // commit the floated / zoomed-pan position
         )
@@ -390,13 +444,15 @@ private struct ReaderContent: View {
     /// Zoom scales about the centre; drag pans within the zoomed overhang.
     private func spreadPages(size: CGSize) -> some View {
         // Zipped before dropping a missing image, so a facing page keeps its own page number.
-        let pages = zip(model.imagePages, [model.image, model.facing]).compactMap { page, image in image.map { (page, $0) } }
+        let pages = Array(zip(model.imagePages, [model.image, model.facing]).compactMap { page, image in image.map { (page, $0) } }
+            .enumerated())   // numbered in reading order, before mirroring
         return HStack(spacing: 0) {
-            ForEach(Array((model.rightToLeft ? pages.reversed() : pages).enumerated()), id: \.offset) { _, page in
+            ForEach(model.rightToLeft ? pages.reversed() : pages, id: \.offset) { order, page in
                 Image(decorative: page.1, scale: 1).resizable().scaledToFit()
                     .overlay { BalloonLabels(balloons: labels(page.0)) }
                     .overlay { SpokenBalloon(box: spoken(page.0)) }
-                    .overlay { BalloonAccessibility(elements: voiceOverBalloons(page.0)) }
+                    // VoiceOver reads the pages in reading order, a right-to-left spread's right page first.
+                    .overlay { BalloonAccessibility(elements: voiceOverBalloons(page.0)).accessibilitySortPriority(Double(pages.count - order)) }
             }
         }
         .modifier(NightFilterEffect(filter: settings.nightFilter))
@@ -425,7 +481,38 @@ private struct ReaderContent: View {
         return prefix + "full page" + edited
     }
 
+    /// The status line's text: a page number being typed, else a moment's note, else where the reader is.
+    private var statusLine: String {
+        if let page = PageJump.page(typedPage, pageCount: model.pageCount) {
+            return "Go to page \(page + 1) of \(model.pageCount) · Return"
+        }
+        return flash ?? pageStatus
+    }
+
+    /// The chevrons' names: what one step is in this mode.
+    private var stepNames: (back: String, on: String) {
+        switch model.mode {
+        case .panels: ("Previous panel", "Next panel")
+        case .spread: ("Previous spread", "Next spread")
+        case .scroll: ("Scroll up", "Scroll down")
+        }
+    }
+
+    /// The full row while the title keeps about 160 pt, else Translate, Read aloud, the direction and
+    /// Peek fold into the More menu (their shortcuts are the hidden buttons', so they still work).
     private var topBar: some View {
+        ViewThatFits(in: .horizontal) {
+            topBarRow(compact: false)
+            topBarRow(compact: true)
+        }
+        .buttonStyle(.plain)
+        .padding(.leading, 12).padding(.trailing, 6).padding(.top, 8).padding(.bottom, 18)
+        .background(LinearGradient(colors: [Chika.ink.opacity(0.94), .clear],
+                                   startPoint: .top, endPoint: .bottom))
+        .onGeometryChange(for: CGFloat.self, of: { $0.size.height }) { topInset = $0 }
+    }
+
+    private func topBarRow(compact: Bool) -> some View {
         HStack(alignment: .center, spacing: 12) {
             Button { dismiss() } label: {
                 Image(systemName: "arrow.left")
@@ -440,34 +527,39 @@ private struct ReaderContent: View {
             .help("Close (Esc)")
             .accessibilityLabel("Back to library")
             VStack(alignment: .leading, spacing: 2) {
-                Text(model.title).font(.archivo(14, weight: 800)).foregroundColor(Chika.cream).lineLimit(1)
-                Text(typedPage.isEmpty ? pageStatus
-                     : "Go to page \(PageJump.page(typedPage, pageCount: model.pageCount)! + 1) of \(model.pageCount) · Return")
-                    .font(.archivo(9)).tracking(1.4).foregroundColor(Chika.creamMuted)
+                Text(model.title).font(.archivo(14, weight: 800)).foregroundColor(Chika.cream)
+                    .lineLimit(1).truncationMode(.tail)
+                Text(statusLine).font(.archivo(9)).tracking(1.4).foregroundColor(Chika.creamMuted)
+                    .lineLimit(1).truncationMode(.tail)
             }
-            Spacer()
+            // Its own dark ground: this low the bar's gradient is nearly clear over light page art.
+            .padding(.horizontal, 12).padding(.vertical, 4)
+            .background(Chika.ink.opacity(0.75), in: Capsule())
+            // Takes what the controls leave; the ideal width is the room the full row must leave it.
+            .frame(minWidth: 0, idealWidth: 160, maxWidth: .infinity, alignment: .leading)
+            .layoutPriority(-1)
             Button { step(-1) } label: {
                 Image(systemName: "chevron.left").foregroundColor(Chika.cream).frame(width: 36, height: 38)
             }
-            .help("Previous panel (Left Arrow)")
-            .accessibilityLabel("Previous panel")
+            .help("\(stepNames.back) (Left Arrow)")
+            .accessibilityLabel(stepNames.back)
             Button { step(1) } label: {
                 Image(systemName: "chevron.right").foregroundColor(Chika.cream).frame(width: 36, height: 38)
             }
-            .help("Next panel (Right Arrow)")
-            .accessibilityLabel("Next panel")
-            // Show whole page (Android's ZoomOutMap): plain icon, always enabled (no-op on full page).
-            Button { wholePage() } label: {
-                Image(systemName: "arrow.up.left.and.arrow.down.right")
-                    .font(.system(size: 18, weight: .semibold))
-                    .foregroundColor(Chika.cream)
-                    .frame(width: 38, height: 38)
+            .help("\(stepNames.on) (Right Arrow)")
+            .accessibilityLabel(stepNames.on)
+            // Show whole page (Android's ZoomOutMap): plain icon, always enabled (no-op on full page). Panels only.
+            if model.mode == .panels {
+                Button { wholePage() } label: {
+                    Image(systemName: "arrow.up.left.and.arrow.down.right")
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundColor(Chika.cream)
+                        .frame(width: 38, height: 38)
+                }
+                .help("Show whole page (⌘0)")
+                .accessibilityLabel("Show whole page")
             }
-            .keyboardShortcut("0", modifiers: .command)
-            .help("Show whole page (⌘0)")
-            .accessibilityLabel("Show whole page")
-            .opacity(model.mode == .panels ? 1 : 0)
-            .disabled(model.mode != .panels)
+            // Labels, not bare images, so VoiceOver does not read the symbols' names as the menus' titles.
             Menu {
                 Button(marked ? "Remove bookmark" : "Add bookmark") { model.toggleBookmark() }
                 if !model.bookmarks.isEmpty { Divider() }
@@ -479,7 +571,8 @@ private struct ReaderContent: View {
                     }
                 }
             } label: {
-                Image(systemName: marked ? "bookmark.fill" : "bookmark")
+                Label("Bookmarks", systemImage: marked ? "bookmark.fill" : "bookmark")
+                    .labelStyle(.iconOnly)
                     .font(.system(size: 16, weight: .semibold))
                     .foregroundColor(Chika.cream)
             }
@@ -495,7 +588,8 @@ private struct ReaderContent: View {
                 }
                 .pickerStyle(.inline)
             } label: {
-                Image(systemName: ["panels": "rectangle.split.2x2", "spread": "book", "scroll": "scroll"][model.mode.rawValue]!)
+                Label("Reading mode", systemImage: ["panels": "rectangle.split.2x2", "spread": "book", "scroll": "scroll"][model.mode.rawValue]!)
+                    .labelStyle(.iconOnly)
                     .font(.system(size: 16, weight: .semibold))
                     .foregroundColor(Chika.cream)
             }
@@ -504,13 +598,15 @@ private struct ReaderContent: View {
             .fixedSize()
             .help("Reading mode: ⌘1 panels, ⌘2 two pages, ⌘3 scroll")
             .accessibilityLabel("Reading mode")
+            .accessibilityValue(model.mode.title)
             Menu {
                 Picker("Night filter", selection: $settings.nightFilter) {
                     ForEach(NightFilter.allCases, id: \.self) { Text($0.title).tag($0) }
                 }
                 .pickerStyle(.inline)
             } label: {
-                Image(systemName: settings.nightFilter == .off ? "moon" : "moon.fill")
+                Label("Night filter", systemImage: settings.nightFilter == .off ? "moon" : "moon.fill")
+                    .labelStyle(.iconOnly)
                     .font(.system(size: 16, weight: .semibold))
                     .foregroundColor(Chika.cream)
             }
@@ -520,39 +616,52 @@ private struct ReaderContent: View {
             .help("Night filter: invert, sepia or dim the pages (⌥⌘N cycles)")
             .accessibilityLabel("Night filter")
             .accessibilityValue(settings.nightFilter.title)
-            Button { translator.isOn.toggle() } label: {
-                Image(systemName: translator.isOn ? "character.bubble.fill" : "character.bubble")
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundColor(Chika.cream)
-                    .frame(width: 38, height: 38)
+            if !compact {
+                // Scroll has neither, so there they show off whatever their setting.
+                Button { translator.isOn.toggle() } label: {
+                    Image(systemName: translator.isOn && model.mode != .scroll ? "character.bubble.fill" : "character.bubble")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundColor(Chika.cream)
+                        .frame(width: 38, height: 38)
+                }
+                .help(model.mode == .scroll ? "Translate works in Panels and Two pages" : "Translate the speech balloons (⇧⌘T); hover one for the original")
+                .accessibilityLabel("Translate")
+                .accessibilityValue(model.mode == .scroll ? "Off in Scroll" : translator.isOn ? "On" : "Off")
+                .disabled(model.mode == .scroll)
+                Button { toggleReadAloud() } label: {
+                    Image(systemName: speaker.isOn && model.mode != .scroll ? "speaker.wave.2.fill" : "speaker.wave.2")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundColor(Chika.cream)
+                        .frame(width: 38, height: 38)
+                }
+                .help(model.mode == .scroll ? "Read aloud works in Panels and Two pages"
+                      : "Read the balloons aloud and step on by itself (⇧⌘R); speed in Settings")
+                .accessibilityLabel("Read aloud")
+                .accessibilityValue(model.mode == .scroll ? "Off in Scroll" : speaker.isOn ? "On" : "Off")
+                .disabled(model.mode == .scroll)
+                DirectionChip(rightToLeft: model.rightToLeft) { model.toggleDirection() }
+                Button { openPeek() } label: {
+                    Image(systemName: "pip.enter")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundColor(Chika.cream)
+                        .frame(width: 38, height: 38)
+                }
+                .help("Peek: float the current panel (⇧⌘P)")
+                .accessibilityLabel("Peek")
             }
-            .keyboardShortcut("t", modifiers: [.command, .shift])
-            .help(model.mode == .scroll ? "Translate works in Panels and Two pages" : "Translate the speech balloons (⇧⌘T); hover one for the original")
-            .accessibilityLabel("Translate")
-            .accessibilityValue(translator.isOn ? "On" : "Off")
-            .disabled(model.mode == .scroll)
-            Button { toggleReadAloud() } label: {
-                Image(systemName: speaker.isOn ? "speaker.wave.2.fill" : "speaker.wave.2")
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundColor(Chika.cream)
-                    .frame(width: 38, height: 38)
-            }
-            .help(model.mode == .scroll ? "Read aloud works in Panels and Two pages"
-                  : "Read the balloons aloud and step on by itself (⇧⌘R); speed in Settings")
-            .accessibilityLabel("Read aloud")
-            .accessibilityValue(speaker.isOn ? "On" : "Off")
-            .disabled(model.mode == .scroll)
-            DirectionChip(rightToLeft: model.rightToLeft) { model.toggleDirection() }
-            Button { openWindow(id: "peek", value: model.comicURL) } label: {
-                Image(systemName: "pip.enter")
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundColor(Chika.cream)
-                    .frame(width: 38, height: 38)
-            }
-            .keyboardShortcut("p", modifiers: [.command, .shift])
-            .help("Peek: float the current panel (⌘⇧P)")
-            .accessibilityLabel("Peek")
             Menu {
+                if compact {
+                    Toggle("Translate", isOn: $translator.isOn)
+                        .keyboardShortcut("t", modifiers: [.command, .shift])
+                        .disabled(model.mode == .scroll)
+                    Toggle("Read Aloud", isOn: Binding(get: { speaker.isOn }, set: { _ in toggleReadAloud() }))
+                        .keyboardShortcut("r", modifiers: [.command, .shift])
+                        .disabled(model.mode == .scroll)
+                    Toggle("Right to Left", isOn: Binding(get: { model.rightToLeft }, set: { _ in model.toggleDirection() }))
+                    Button("Peek") { openPeek() }
+                        .keyboardShortcut("p", modifiers: [.command, .shift])
+                    Divider()
+                }
                 // Sends Edit > Copy, so it lands in onCopyCommand like ⌘C does.
                 Button("Copy Panel") { NSApp.sendAction(#selector(NSText.copy(_:)), to: nil, from: nil) }
                     .keyboardShortcut("c", modifiers: .command)
@@ -563,20 +672,18 @@ private struct ReaderContent: View {
                     .keyboardShortcut("e", modifiers: .command)
                     .disabled(!model.canEditPanels)
             } label: {
-                Image(systemName: "ellipsis.circle")
+                Label("More", systemImage: "ellipsis.circle")
+                    .labelStyle(.iconOnly)
                     .font(.system(size: 16, weight: .semibold))
                     .foregroundColor(Chika.cream)
             }
             .menuStyle(.borderlessButton)
             .menuIndicator(.hidden)
             .fixedSize()
-            .help("More: copy the panel (⌘C), export it as a PNG (⇧⌘E) or edit this page's panels (⌘E)")
+            .help((compact ? "More: translate, read aloud, reading direction, peek, " : "More: ")
+                  + "copy the panel (⌘C), export it as a PNG (⇧⌘E) or edit this page's panels (⌘E)")
             .accessibilityLabel("More")
         }
-        .buttonStyle(.plain)
-        .padding(.leading, 12).padding(.trailing, 6).padding(.top, 8).padding(.bottom, 18)
-        .background(LinearGradient(colors: [Chika.ink.opacity(0.94), .clear],
-                                   startPoint: .top, endPoint: .bottom))
     }
 
     private var bottomBar: some View {
@@ -585,6 +692,11 @@ private struct ReaderContent: View {
                 // On the last page, the next issue of the series (ComicInfo.xml) replaces the hint.
                 if model.onLastPage, let next = library.nextIssue(after: model.comicURL) {
                     Button {
+                        // It opens in this window's place and size, unless it is open already (or this one is full screen).
+                        if let here = window.value, !here.styleMask.contains(.fullScreen),
+                           !ShortcutTarget.shown.contains(where: { $0.comicURL == next }) {
+                            ReaderWindowConfigurator.handedOn[next] = here.frame
+                        }
                         openWindow(id: "reader", value: next)
                         dismiss()
                     } label: {
@@ -599,29 +711,50 @@ private struct ReaderContent: View {
                     .help("Open the next issue (Return)")
                 } else {
                     Text("ARROW KEYS TO READ").font(.anton(12)).tracking(2).foregroundColor(Chika.creamMuted)
+                        // Its own dark ground, like the NEXT ISSUE pill: up here the bar's gradient is still clear.
+                        .padding(.horizontal, 12).padding(.vertical, 6)
+                        .background(Chika.ink.opacity(0.75), in: Capsule())
                 }
                 Spacer()
-                PageCoin(page: (scrubbing ? Int(scrub.rounded()) : lastVisiblePage) + 1, total: model.pageCount)
-            }
-            Slider(
-                value: $scrub,
-                in: 0...Double(max(model.pageCount - 1, 1)),
-                onEditingChanged: { editing in
-                    if editing { scrubbing = true }
-                    else {
-                        scrubbing = false
-                        jump(to: Int(scrub.rounded()))
-                    }
+                // A one-page issue has nothing to scrub, but keeps its NEXT ISSUE.
+                if model.pageCount > 1 {
+                    PageCoin(page: (scrubbing ? Int(scrub.rounded()) : lastVisiblePage) + 1, total: model.pageCount)
+                        .accessibilityHidden(true)   // the scrubber says the page
                 }
-            )
-            .tint(Chika.ochre)
-            .accessibilityLabel("Page")
+            }
+            if model.pageCount > 1 { scrubber }
         }
         .padding(.horizontal, 20).padding(.top, 24).padding(.bottom, 12)
         .background(LinearGradient(colors: [.clear, Chika.ink.opacity(0.97)],
                                    startPoint: .top, endPoint: .bottom))
+        .onGeometryChange(for: CGFloat.self, of: { $0.size.height }) { bottomInset = $0 }
         // Keep the scrubber in sync with programmatic page changes (clicks, keys, peek) while not scrubbing.
         .onChange(of: lastVisiblePage, initial: true) { _, page in if !scrubbing { scrub = Double(page) } }
+    }
+
+    /// The page scrubber: a drag goes to its page on release; the keyboard and VoiceOver turn pages as it moves.
+    private var scrubber: some View {
+        // Not stepped: on the Mac a stepped slider draws a tick mark for every page.
+        Slider(
+            value: $scrub,
+            in: 0...Double(max(model.pageCount - 1, 1)),
+            onEditingChanged: { editing in
+                if editing { scrubbing = true }
+                else if scrubbing {   // not when the window going to the back already ended it
+                    scrubbing = false
+                    jump(to: Int(scrub.rounded()))
+                    scrub = Double(lastVisiblePage)   // a spread's last page, like the coin
+                }
+            }
+        )
+        .tint(Chika.ochre)
+        .onChange(of: scrub) {
+            if !scrubbing, let page = PageJump.scrubbed(to: scrub, visible: model.visiblePages) { jump(to: page) }
+        }
+        .accessibilityLabel("Go to page")
+        .accessibilityValue(PageAccessibility.label(pages: scrubbing ? [Int(scrub.rounded())] : model.visiblePages,
+                                                    of: model.pageCount, panel: nil, hasText: nil))
+        .accessibilityAdjustableAction { model.turnPage(next: $0 == .increment) }
     }
 
     /// The coin's and scrubber's page: a spread's last, whichever page of it was targeted, so the last spread reads as the end.
@@ -631,24 +764,27 @@ private struct ReaderContent: View {
     // pre-ordered in reading direction, so this is RTL-agnostic); every click steps, so quick clicks
     // step twice. A double-click in the middle third shows the whole page (the chrome is always shown).
     private func tapZone(x: CGFloat, width: CGFloat) {
-        if x < width / 3 { model.advance(by: -1) }
-        else if x > width * 2 / 3 { model.advance(by: 1) }
+        if x < width / 3 { advance(-1) }
+        else if x > width * 2 / 3 { advance(1) }
         else if NSApp.currentEvent?.clickCount == 2 { wholePage() }
     }
 
     /// Export Panel… (⇧⌘E): what is being read, saved as a PNG where the user picks.
     private func exportPanel() {
-        guard let image = model.readingImage() else { NSSound.beep(); return }
+        guard let image = model.readingImage(), let host = window.value else { NSSound.beep(); return }
         let panel = NSSavePanel()
         panel.allowedContentTypes = [.png]
         panel.nameFieldStringValue = "\(model.title) p\(model.here.page + 1).png"
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        do {
-            guard let png = NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:])
-            else { throw CocoaError(.fileWriteUnknown) }
-            try png.write(to: url)
-        } catch {
-            NSAlert(error: error).runModal()
+        // A sheet on this reader, so the app's other windows stay usable while it is up.
+        panel.beginSheetModal(for: host) { response in
+            guard response == .OK, let url = panel.url else { return }
+            do {
+                guard let png = NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:])
+                else { throw CocoaError(.fileWriteUnknown) }
+                try png.write(to: url)
+            } catch {
+                NSAlert(error: error).beginSheetModal(for: host)
+            }
         }
     }
 
@@ -738,6 +874,30 @@ private struct SwipeToTurn: NSViewRepresentable {
             let fingers: CGFloat = event.isDirectionInvertedFromDevice ? 1 : -1
             if let next = swipe.moved(dx: Float(event.scrollingDeltaX * fingers), dy: Float(event.scrollingDeltaY * fingers),
                                       rightToLeft: rightToLeft) { turn(next) }
+        }
+    }
+}
+
+/// The reader's NSWindow, held for its sheets and NEXT ISSUE, with its frame kept per comic (a frame
+/// autosave name), so a comic reopens where it was left and at that size, after a relaunch too.
+private struct ReaderWindowConfigurator: NSViewRepresentable {
+    let comicURL: URL
+    let window: WeakWindow
+
+    /// A frame NEXT ISSUE hands to the issue it opens, until that reader's window takes it.
+    static var handedOn: [URL: NSRect] = [:]
+
+    func makeNSView(context: Context) -> NSView { NSView() }
+
+    func updateNSView(_ view: NSView, context: Context) {
+        // The view joins its window after this first update, so look it up on the next turn.
+        DispatchQueue.main.async {
+            guard let window = view.window, self.window.value !== window else { return }
+            self.window.value = window
+            let name = "chika.reader." + ReadingProgress.key(comicURL)
+            window.setFrameUsingName(name)
+            window.setFrameAutosaveName(name)
+            if let frame = Self.handedOn.removeValue(forKey: comicURL) { window.setFrame(frame, display: true) }
         }
     }
 }
@@ -919,6 +1079,7 @@ struct DirectionChip: View {
                     .font(.system(size: 15, weight: .semibold)).foregroundColor(Chika.cream)
                 Text(rightToLeft ? "RTL" : "LTR")
                     .font(.archivo(11, weight: 700)).tracking(1).foregroundColor(Chika.cream)
+                    .fixedSize()   // never squeezed into a letter per line
             }
             .padding(.horizontal, 10).padding(.vertical, 6)
             .background(Chika.cream.opacity(0.12))
@@ -926,6 +1087,7 @@ struct DirectionChip: View {
         }
         .buttonStyle(.plain)
         .help("Reading direction")
-        .accessibilityLabel(rightToLeft ? "Reading right to left" : "Reading left to right")
+        .accessibilityLabel("Reading direction")
+        .accessibilityValue(rightToLeft ? "Right to left" : "Left to right")
     }
 }

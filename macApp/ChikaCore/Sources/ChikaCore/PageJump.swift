@@ -13,4 +13,15 @@ public enum PageJump {
         guard let number = Int(typed), pageCount > 0 else { return nil }
         return min(max(number, 1), pageCount) - 1
     }
+
+    /// The page scrubber moved without a drag (the keyboard) to `value` with `visible` on screen (0-based,
+    /// in page order; the thumb sits on the last): the page to go to, nil to stay. Down onto an earlier
+    /// page of the spread on screen means the page before the spread, else that spread would come back
+    /// and snap the thumb up to its last page again.
+    public static func scrubbed(to value: Double, visible: [Int]) -> Int? {
+        let page = Int(value.rounded())
+        guard let first = visible.first, page != visible.last else { return nil }
+        guard visible.contains(page) else { return page }
+        return first > 0 ? first - 1 : nil
+    }
 }

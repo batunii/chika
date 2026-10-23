@@ -54,6 +54,14 @@ goes to until about 1.5 s after the last digit. A number past the last page (or 
 the nearest page; Esc clears the number. Return and Esc with nothing typed keep their meaning (on the
 last page, the next issue; close the reader). ⌘F toggles full screen, as does View > Enter Full Screen (⌃⌘F).
 
+A reader window opens 820 × 900 pt (fitted to the screen) and is at least 640 × 480 pt. Each comic's
+window reopens where it was left and at that size, after a relaunch too, and NEXT ISSUE opens the next
+issue in its place. In Panels and Two pages the page (a framed panel, the spread) is fitted between the
+top and bottom bars, so none of it starts out under them. In a narrow window Translate, Read aloud, the
+reading direction and Peek move from the top bar into the "…" menu; their shortcuts keep working.
+Stepping on past the end of the comic says "End of comic" in the status line for a moment. A one-page
+issue has no scrubber, but its NEXT ISSUE (and Return) still show.
+
 ## Reopen at launch
 
 Quitting with reader windows open and launching again reopens them, each at its saved page and panel,
@@ -90,9 +98,9 @@ it is added again.
 
 ⌘C (Edit > Copy) puts what you are reading on the clipboard as an image: the current panel in
 Panels mode (the page when the whole page shows), both pages of the spread side by side in Two
-pages, the page at the top in Scroll. In the peek window ⌘C copies what the peek shows (the whole
-spread in Two pages). ⇧⌘E (Export Panel…) saves that image as a PNG wherever you choose, named
-"<title> p<page>.png".
+pages, the page at the top in Scroll; the reader's status line says "Copied". In the peek window ⌘C
+copies what the peek shows (the whole spread in Two pages). ⇧⌘E (Export Panel…) saves that image as a
+PNG wherever you choose, from a sheet on the reader window, named "<title> p<page>.png".
 Both are also in the "…" menu at the end of the top bar, and do nothing while a new page is still
 loading. The image is the decoded page without the night filter: full size up to about 5000 px
 (larger scans are halved until they fit; in Scroll the limit is on the page's width, so a long strip
@@ -178,9 +186,11 @@ by hand cuts the balloon off and carries on from the new place. Settings (⌘,) 
 ## VoiceOver
 
 With VoiceOver on, the page in Panels and Two pages says where you are ("Page 4 of 20, panel 2 of
-5", "Pages 4 and 5 of 20") and the arrow keys read on. Inside it, the speech balloons of the view on
-screen are elements in reading order, the same ones Read aloud would speak: the panel's balloons in
-Panels mode, every balloon on a whole page or a spread, panel by panel. Each says the translation when Translate is on
+5", "Pages 4 and 5 of 20") and the arrow keys read on, each step saying where it landed. Inside it, the
+speech balloons of the view on screen are elements in reading order, the same ones Read aloud would
+speak: the panel's balloons in Panels mode, every balloon on a whole page or a spread, panel by panel
+(a right-to-left spread's right page first). The page scrubber says the page, and VoiceOver's adjust
+gestures on it turn a page (a spread in Two pages). Each says the translation when Translate is on
 and has one (with the original as its hint), else the text off the page. A view with no text says
 "no text" once it has been read. VoiceOver alone is enough to have the balloons read (with Translate and
 Read aloud off), using the same stored text; nothing changes on screen.
