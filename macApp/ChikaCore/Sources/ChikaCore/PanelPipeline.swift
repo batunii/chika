@@ -47,3 +47,30 @@ public enum PanelPipeline {
         }
     }
 }
+
+/// One page's detector output as the reader keeps it: the zoom regions for each reading direction
+/// (planning is cheap next to inference, so one model run plans both) and the raw speech-balloon boxes.
+public struct PageDetection: Equatable, Sendable {
+    public let leftToRight: [Panel]
+    public let rightToLeft: [Panel]
+    public let bubbles: [Panel]
+
+    public init(leftToRight: [Panel], rightToLeft: [Panel], bubbles: [Panel]) {
+        self.leftToRight = leftToRight
+        self.rightToLeft = rightToLeft
+        self.bubbles = bubbles
+    }
+
+    /// Plans `result` in both directions. Fewer than 2 regions read the page whole, as Android's
+    /// MlPanelDetector.detect does.
+    public init(_ result: DetectResult) {
+        let plan = { (rtl: Bool) -> [Panel] in
+            let planned = PanelPipeline.zoomRegions(panels: result.panels, bubbles: result.bubbles,
+                                                    pageW: result.pageW, pageH: result.pageH, rightToLeft: rtl)
+            return planned.count < 2 ? [.fullPage] : planned
+        }
+        self.init(leftToRight: plan(false), rightToLeft: plan(true), bubbles: result.bubbles)
+    }
+
+    public func regions(rightToLeft rtl: Bool) -> [Panel] { rtl ? rightToLeft : leftToRight }
+}

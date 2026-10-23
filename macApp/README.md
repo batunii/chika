@@ -106,6 +106,16 @@ deleted; a comic read in place keeps them, like its progress (until then the tra
 them as skipped). A bookmark or resume point on that page keeps its panel number, so after an edit it can
 land on a different panel.
 
+## Stored detections
+
+Each page's detector output (its zoom regions for both reading directions and its speech-balloon
+boxes) is kept in the progress database, so reopening a comic, flipping its direction or opening the
+peek window never waits on the detector. After a comic is imported or opened, Chika detects the pages
+not stored yet in the background, one comic at a time at low priority with its own copy of the model,
+so the reader's own detection never queues behind it. Rows carry the detector's version
+(`CoreMLPanelDetector.version`): bump it when the model, decoder or planner changes and old rows are
+detected again. Panel edits still win over stored detections. Deleting an imported comic drops its rows.
+
 ## Training export
 
 File > Export Panel Corrections… turns pages fixed in the panel editor into training data for the

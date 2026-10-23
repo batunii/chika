@@ -74,6 +74,7 @@ enum ReadingProgress {
         run("DELETE FROM progress WHERE id = ?", [key(url)])
         run("DELETE FROM bookmarks WHERE id = ?", [key(url)])
         run("DELETE FROM panel_overrides WHERE id = ?", [key(url)])
+        run("DELETE FROM detections WHERE id = ?", [key(url)])
         changed()
     }
 
@@ -162,6 +163,44 @@ enum ReadingProgress {
         return rows
     }
 
+    // MARK: - Stored detections (instant reopen, background pre-detection)
+
+    /// A page's stored zoom regions for one reading direction and its speech balloons; nil when it
+    /// was never detected or was detected by another detector `version`.
+    static func detection(_ url: URL, page: Int, rtl: Bool,
+                          version: Int = CoreMLPanelDetector.version) -> (regions: [Panel], bubbles: [Panel])? {
+        var found: (regions: [Panel], bubbles: [Panel])?
+        run("SELECT regions, bubbles FROM detections WHERE id = ? AND page = ? AND rtl = ? AND version = ?",
+            [key(url), page, rtl, version]) { row in
+            let decode = { (col: Int32) in
+                sqlite3_column_text(row, col).flatMap { try? JSONDecoder().decode([Panel].self, from: Data(String(cString: $0).utf8)) }
+            }
+            if let regions = decode(0), let bubbles = decode(1) { found = (regions, bubbles) }
+        }
+        return found
+    }
+
+    /// Stores a page's detection, one row per reading direction, replacing any older version's.
+    static func setDetection(_ url: URL, page: Int, _ detection: PageDetection, version: Int = CoreMLPanelDetector.version) {
+        let encode = { (panels: [Panel]) in (try? JSONEncoder().encode(panels)).map { String(decoding: $0, as: UTF8.self) } }
+        let id = key(url)
+        run("BEGIN")
+        for rtl in [false, true] {
+            run("INSERT OR REPLACE INTO detections(id, page, rtl, version, regions, bubbles) VALUES(?, ?, ?, ?, ?, ?)",
+                [id, page, rtl, version, encode(detection.regions(rightToLeft: rtl)), encode(detection.bubbles)])
+        }
+        run("COMMIT")
+    }
+
+    /// The pages stored in both reading directions by this detector `version`.
+    static func detectedPages(_ url: URL, version: Int = CoreMLPanelDetector.version) -> Set<Int> {
+        var pages: Set<Int> = []
+        run("SELECT page FROM detections WHERE id = ? AND version = ? GROUP BY page HAVING COUNT(*) = 2", [key(url), version]) { row in
+            pages.insert(Int(sqlite3_column_int64(row, 0)))
+        }
+        return pages
+    }
+
     // MARK: - Migration
 
     /// One-time copy of the old filename-keyed UserDefaults JSON into the table, for the files in
@@ -200,6 +239,8 @@ enum ReadingProgress {
             CREATE TABLE IF NOT EXISTS progress(id TEXT PRIMARY KEY, page INTEGER, step INTEGER, total INTEGER, rtl INTEGER, opened REAL);
             CREATE TABLE IF NOT EXISTS bookmarks(id TEXT, page INTEGER, step INTEGER, PRIMARY KEY(id, page, step));
             CREATE TABLE IF NOT EXISTS panel_overrides(id TEXT, page INTEGER, panels TEXT NOT NULL, PRIMARY KEY(id, page));
+            CREATE TABLE IF NOT EXISTS detections(id TEXT, page INTEGER, rtl INTEGER, version INTEGER,
+                regions TEXT NOT NULL, bubbles TEXT NOT NULL, PRIMARY KEY(id, page, rtl));
             """, nil, nil, nil)
         // Added in phase 3; each fails harmlessly once the column exists. drawn NULL (an edit saved before it) = not drawn.
         sqlite3_exec(handle, "ALTER TABLE progress ADD COLUMN mode TEXT", nil, nil, nil)

@@ -100,6 +100,7 @@ final class LibraryStore: ObservableObject {
             do {
                 let dest = try await Task.detached(priority: .userInitiated) { try Self.install(url, into: dir) }.value
                 ReadingProgress.markOpened(dest)   // fresh import sorts to the top
+                BookPredetector.shared.add(dest)   // its panels are ready before it is first opened
             } catch {
                 importError = "Couldn't import \(url.lastPathComponent): \(error.localizedDescription)"
             }
@@ -112,6 +113,7 @@ final class LibraryStore: ObservableObject {
     /// An imported copy is deleted. A comic read in place only leaves the library: its bookmark (or
     /// its whole watched folder) is forgotten and the user's file is never touched.
     func delete(_ url: URL) {
+        BookPredetector.shared.cancel(url)   // before its rows are cleared, so no late detection lands
         if let root = sources[url] {
             roots.removeAll { $0.url == root }
             saveBookmarks()

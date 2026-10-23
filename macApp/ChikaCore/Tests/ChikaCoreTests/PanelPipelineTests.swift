@@ -36,3 +36,19 @@ struct PanelPipelineTests {
         }
     }
 }
+
+struct PageDetectionTests {
+    @Test func oneRunPlansBothDirectionsAndKeepsTheBubbles() {
+        let left = Panel(0.0, 0.0, 0.45, 1.0), right = Panel(0.55, 0.0, 1.0, 1.0)
+        let bubble = Panel(0.6, 0.1, 0.7, 0.2)
+        let detection = PageDetection(DetectResult(panels: [left, right], bubbles: [bubble], pageW: 1000, pageH: 1500))
+
+        #expect(detection.bubbles == [bubble])
+        #expect(detection.regions(rightToLeft: false) == PanelPipeline.zoomRegions(
+            panels: [left, right], bubbles: [bubble], pageW: 1000, pageH: 1500, rightToLeft: false))
+        #expect(detection.regions(rightToLeft: true) == PanelPipeline.zoomRegions(
+            panels: [left, right], bubbles: [bubble], pageW: 1000, pageH: 1500, rightToLeft: true))
+        // Read left to right the left panel comes first; right to left, the right one.
+        #expect(detection.leftToRight.first!.left < 0.5 && detection.rightToLeft.first!.left >= 0.5)
+    }
+}

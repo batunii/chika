@@ -87,6 +87,36 @@ final class LibraryStoreTests: XCTestCase {
         XCTAssertEqual(ReadingProgress.bookmarks(b), [Bookmark(page: 0, step: 0)])
     }
 
+    func testDetectionsRoundTripPerDirectionAndAnotherVersionIsIgnored() throws {
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let a = dir.appendingPathComponent("A.cbz"), b = dir.appendingPathComponent("B.cbz")
+        try FileManager.default.copyItem(at: comic, to: a)
+        try FileManager.default.copyItem(at: comic, to: b)
+        let left = Panel(left: 0, top: 0, right: 0.5, bottom: 1), right = Panel(left: 0.5, top: 0, right: 1, bottom: 1)
+        let bubble = Panel(left: 0.1, top: 0.1, right: 0.2, bottom: 0.2)
+        let found = PageDetection(leftToRight: [left, right], rightToLeft: [right, left], bubbles: [bubble])
+
+        ReadingProgress.setDetection(a, page: 2, found, version: 1)
+        XCTAssertEqual(ReadingProgress.detection(a, page: 2, rtl: false, version: 1)?.regions, [left, right])
+        XCTAssertEqual(ReadingProgress.detection(a, page: 2, rtl: true, version: 1)?.regions, [right, left])
+        XCTAssertEqual(ReadingProgress.detection(a, page: 2, rtl: true, version: 1)?.bubbles, [bubble])
+        XCTAssertEqual(ReadingProgress.detectedPages(a, version: 1), [2])
+        XCTAssertNil(ReadingProgress.detection(a, page: 1, rtl: false, version: 1))
+        XCTAssertNil(ReadingProgress.detection(b, page: 2, rtl: false, version: 1))
+
+        // A new detector version ignores the old rows, then replaces them.
+        XCTAssertNil(ReadingProgress.detection(a, page: 2, rtl: false, version: 2))
+        XCTAssertEqual(ReadingProgress.detectedPages(a, version: 2), [])
+        ReadingProgress.setDetection(a, page: 2, PageDetection(leftToRight: [right], rightToLeft: [left], bubbles: []), version: 2)
+        XCTAssertEqual(ReadingProgress.detection(a, page: 2, rtl: false, version: 2)?.regions, [right])
+        XCTAssertNil(ReadingProgress.detection(a, page: 2, rtl: false, version: 1))
+
+        ReadingProgress.setDetection(b, page: 0, found, version: 2)
+        ReadingProgress.clear(a)
+        XCTAssertEqual(ReadingProgress.detectedPages(a, version: 2), [])
+        XCTAssertEqual(ReadingProgress.detectedPages(b, version: 2), [0])
+    }
+
     func testWatchedFolderIsReadInPlaceAndNeverDeleted() throws {
         let folder = dir.appendingPathExtension("watched")
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)

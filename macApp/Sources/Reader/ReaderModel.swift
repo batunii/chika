@@ -45,7 +45,8 @@ final class ReaderModel: ObservableObject {
     private var loader: PageLoader?
     private var loadToken = 0
     // Detected panels cached per page (in the current reading direction) so back/forward and
-    // prefetched pages don't re-run the detector. Cleared when the direction changes.
+    // prefetched pages don't re-run the detector. Cleared when the direction changes. Behind it, every
+    // detection is stored in the progress database (both directions), so a reopened comic skips the detector.
     private var panelCache: [Int: [Panel]] = [:]
     // Panels drawn by hand in the panel editor, per page, read from the database as each page loads.
     // They win over detection and keep their stored order in either reading direction.
@@ -112,6 +113,7 @@ final class ReaderModel: ObservableObject {
             state = .ready
             ReadingProgress.markOpened(comicURL)   // bump recency so it sorts to the top of the library
             loadPage()
+            BookPredetector.shared.add(comicURL)   // the pages not stored yet, in the background
         } catch {
             state = .failed("Could not open archive: \(error.localizedDescription)")
         }
@@ -128,7 +130,7 @@ final class ReaderModel: ObservableObject {
         // camera never frames it on the page still on screen.
         if mode == .panels {
             overrides[slots.page] = ReadingProgress.panelOverride(comicURL, page: slots.page)
-            if let known = overrides[slots.page] ?? panelCache[slots.page],
+            if let known = knownRegions(slots.page),
                slots.step == -1 || slots.step == ReaderSlots.outroSentinel { slots.setRegions(known) }
         }
         detecting = false
@@ -152,10 +154,10 @@ final class ReaderModel: ObservableObject {
                 guard self.mode == .panels else { self.prefetchSpread(after: pages.last!); return }
                 let img = images[0]
                 // Also when the regions came from a cache that a direction flip or a reset cleared during the load.
-                if self.slots.regions == nil || (self.overrides[target] ?? self.panelCache[target]) == nil {
+                if self.slots.regions == nil || self.knownRegions(target) == nil {
                     // A bookmark's known panels glide in now. An undecodable page reads as one
                     // whole-page region so the reader can step past it.
-                    if let known = self.overrides[target] ?? self.panelCache[target] {
+                    if let known = self.knownRegions(target) {
                         withAnimation(Self.cameraTween) { self.slots.setRegions(known) }
                     } else if img == nil { self.slots.setRegions([.fullPage]) } else { self.redetect() }
                 }
@@ -164,17 +166,26 @@ final class ReaderModel: ObservableObject {
         }
     }
 
+    /// A page's panels without running the detector: drawn by hand, cached, or stored by an earlier
+    /// detection (the reader's or the background pre-detection's).
+    private func knownRegions(_ page: Int) -> [Panel]? {
+        if let known = overrides[page] ?? panelCache[page] { return known }
+        panelCache[page] = ReadingProgress.detection(comicURL, page: page, rtl: rightToLeft)?.regions
+        return panelCache[page]
+    }
+
     private func redetect() {
         // While the page loads, `image` is the previous page; the load detects once it lands.
         guard imagePages == visiblePages, let img = image else { return }
-        let rtl = rightToLeft
         let forPage = slots.page
+        // After a direction flip or a reset the stored detection usually has the page already.
+        if let known = knownRegions(forPage) { landed(known, page: forPage); return }
         detecting = true
         // Serial queue + page guard: scrubbing fast enqueues detections instead of running them
         // concurrently, and stale results for a page we've already left are only cached.
         Self.detectQueue.async {
-            let found = Self.detector.zoomRegions(for: img, rightToLeft: rtl)
-            DispatchQueue.main.async { self.landed(found, page: forPage, rtl: rtl) }
+            let found = Self.detector.detect(img)
+            DispatchQueue.main.async { self.detected(found, page: forPage) }
         }
     }
 
@@ -182,12 +193,11 @@ final class ReaderModel: ObservableObject {
     /// stepping onto it is instant instead of stalling on a multi-MB decode + inference.
     private func prefetch(_ index: Int) {
         guard let loader, index < pageCount, panelCache[index] == nil else { return }
-        let rtl = rightToLeft
-        let edited = ReadingProgress.panelOverride(comicURL, page: index) != nil
+        let detect = knownRegions(index) == nil && ReadingProgress.panelOverride(comicURL, page: index) == nil
         Self.detectQueue.async {
-            guard let img = loader.loadPage(index), !edited else { return }   // an edited page only needs the decode
-            let found = Self.detector.zoomRegions(for: img, rightToLeft: rtl)
-            DispatchQueue.main.async { self.landed(found, page: index, rtl: rtl) }
+            guard let img = loader.loadPage(index), detect else { return }   // a known or edited page only needs the decode
+            let found = Self.detector.detect(img)
+            DispatchQueue.main.async { self.detected(found, page: index) }
         }
     }
 
@@ -205,10 +215,17 @@ final class ReaderModel: ObservableObject {
         }
     }
 
+    /// The detector ran: store the result (both directions, so a flip needs no rerun) and land the
+    /// current direction's regions. A failed run reads the page whole and stores nothing.
+    private func detected(_ found: PageDetection?, page: Int) {
+        if let found { ReadingProgress.setDetection(comicURL, page: page, found) }
+        landed(found?.regions(rightToLeft: rightToLeft) ?? [.fullPage], page: page)
+    }
+
     /// A detection finished: cache it, and if we're still on that page, glide into its panels.
-    private func landed(_ found: [Panel], page: Int, rtl: Bool) {
-        // Stale cache, no camera to move, or a page whose panels were drawn by hand.
-        guard rtl == rightToLeft, mode == .panels, overrides[page] == nil else { return }
+    private func landed(_ found: [Panel], page: Int) {
+        // No camera to move, or a page whose panels were drawn by hand.
+        guard mode == .panels, overrides[page] == nil else { return }
         panelCache[page] = found
         // A page still loading picks the panels up from the cache, so a bookmark's panel is never framed on the previous page.
         guard page == slots.page, imagePages == visiblePages else { return }

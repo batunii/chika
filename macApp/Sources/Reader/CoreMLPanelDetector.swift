@@ -28,34 +28,38 @@ final class CoreMLPanelDetector: @unchecked Sendable {   // thread-safe: inferen
             .flatMap { try? MLModel(contentsOf: $0) }
     }
 
-    func zoomRegions(for cg: CGImage, rightToLeft: Bool) -> [Panel] {
-        guard let model else { return [.fullPage] }
+    /// Stored detections from another version are ignored and detected again.
+    // shortcut: bumped by hand whenever the model, YoloPanelDecoder or PanelPipeline changes what a
+    // page detects to; derive it from a hash of the model and the pipeline if a bump is ever missed.
+    static let version = 1
+
+    /// The page's zoom regions for both reading directions plus its speech balloons, from one model
+    /// run. Nil when there is no model or inference failed: the reader reads the page whole and
+    /// stores nothing, so the page is detected again next time.
+    func detect(_ cg: CGImage) -> PageDetection? {
+        guard let model else { return nil }
         let pageW = cg.width, pageH = cg.height
         let lb = Letterbox.fit(pageW: pageW, pageH: pageH, inputSize: inputSize)
-        guard let input = letterboxedPixelBuffer(cg, lb: lb) else { return [.fullPage] }
+        guard let input = letterboxedPixelBuffer(cg, lb: lb) else { return nil }
 
         lock.lock()
         defer { lock.unlock() }
         do {
             let features = try MLDictionaryFeatureProvider(dictionary: ["image": MLFeatureValue(pixelBuffer: input)])
             guard let output = try model.prediction(from: features).featureValue(for: "output")?.multiArrayValue else {
-                return [.fullPage]
+                return nil
             }
             // MLShapedArray copies out in row-major order regardless of the output's memory strides.
             let result = decoder.decode(raw: MLShapedArray<Float>(output).scalars,
                                         shape: output.shape.map { $0.intValue },
                                         letterbox: lb, pageW: pageW, pageH: pageH)
-            // EXACT Android parity: run the model's panels through the same shared pipeline
-            // (PanelOrdering → PanelPlanner) and fall back to whole-page only when <2 regions remain —
-            // identical to MlPanelDetector.detect on Android. Android applies NO GutterRefiner and NO
-            // PanelReliability gate, so neither runs here.
-            let planned = PanelPipeline.zoomRegions(
-                panels: result.panels, bubbles: result.bubbles,
-                pageW: result.pageW, pageH: result.pageH, rightToLeft: rightToLeft
-            )
-            return planned.count < 2 ? [.fullPage] : planned
+            // EXACT Android parity: the model's panels go through the same shared pipeline
+            // (PanelOrdering → PanelPlanner) with the same <2-regions whole-page fallback as
+            // MlPanelDetector.detect. Android applies NO GutterRefiner and NO PanelReliability gate,
+            // so neither runs here.
+            return PageDetection(result)
         } catch {
-            return [.fullPage]
+            return nil
         }
     }
 
