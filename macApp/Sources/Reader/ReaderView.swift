@@ -41,6 +41,8 @@ private struct ReaderContent: View {
     @State private var viewport: CGFloat = 0
     // The panel editor replaces the page and both bars (so their Esc and Return shortcuts are gone).
     @State private var editing = false
+    // A page number being typed: Return jumps to it; it goes 1.5 s after the last digit.
+    @State private var typedPage = ""
     @StateObject private var translator = BalloonTranslator()
     @StateObject private var speaker = BalloonSpeaker()
     @State private var voiceOver = NSWorkspace.shared.isVoiceOverEnabled
@@ -111,6 +113,11 @@ private struct ReaderContent: View {
             .disabled(editing)
             .opacity(0)
             .accessibilityHidden(true)
+            // Also while editing panels. View > Enter Full Screen (⌃⌘F) comes with the window; ⌘F is the reader's own.
+            Button("Toggle full screen") { NSApp.keyWindow?.toggleFullScreen(nil) }
+                .keyboardShortcut("f", modifiers: .command)
+                .opacity(0)
+                .accessibilityHidden(true)
         }
         .navigationTitle(model.title)
         .focusable()
@@ -125,6 +132,24 @@ private struct ReaderContent: View {
         }
         .onKeyPress(.pageUp) { turn(next: false); return .handled }
         .onKeyPress(.pageDown) { turn(next: true); return .handled }
+        .onKeyPress(characters: .decimalDigits, phases: .down) { press in
+            // A digit with ⌘, ⌃ or ⌥ is another shortcut's (⌘1-3 pick the mode); other scripts' digits are not page numbers.
+            guard !editing, press.modifiers.isDisjoint(with: [.command, .control, .option]),
+                  let digit = press.characters.first, digit.isASCII else { return .ignored }
+            typedPage = PageJump.append(digit, to: typedPage, pageCount: model.pageCount)
+            return .handled
+        }
+        // With nothing typed Return keeps its meaning (the next issue on the last page).
+        .onKeyPress(.return) {
+            guard !editing, let page = PageJump.page(typedPage, pageCount: model.pageCount) else { return .ignored }
+            typedPage = ""
+            model.goToPage(page)
+            return .handled
+        }
+        .task(id: typedPage) {
+            guard !typedPage.isEmpty, (try? await Task.sleep(for: .seconds(1.5))) != nil else { return }
+            typedPage = ""
+        }
         // Any step or page change lands un-zoomed, like Android.
         .onChange(of: [model.slots.page, model.slots.step]) {
             withAnimation(ReaderModel.cameraTween) { resetZoom() }
@@ -375,7 +400,8 @@ private struct ReaderContent: View {
             .accessibilityLabel("Back to library")
             VStack(alignment: .leading, spacing: 2) {
                 Text(model.title).font(.archivo(14, weight: 800)).foregroundColor(Chika.cream).lineLimit(1)
-                Text(pageStatus).font(.archivo(9)).tracking(1.4).foregroundColor(Chika.creamMuted)
+                Text(typedPage.isEmpty ? pageStatus : "Go to page \(typedPage) of \(model.pageCount) · Return")
+                    .font(.archivo(9)).tracking(1.4).foregroundColor(Chika.creamMuted)
             }
             Spacer()
             Button { step(-1) } label: {
@@ -526,7 +552,8 @@ private struct ReaderContent: View {
                             .background(Chika.crimson).clipShape(Capsule())
                     }
                     .buttonStyle(.plain)
-                    .keyboardShortcut(.return, modifiers: [])
+                    // A typed page number takes Return first.
+                    .keyboardShortcut(typedPage.isEmpty ? KeyboardShortcut(.return, modifiers: []) : nil)
                     .help("Open the next issue (Return)")
                 } else {
                     Text("ARROW KEYS TO READ").font(.anton(12)).tracking(2).foregroundColor(Chika.creamMuted)

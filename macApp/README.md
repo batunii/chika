@@ -47,6 +47,10 @@ In Panels and Two pages a two-finger sideways swipe on the trackpad turns the pa
 Two pages), once per swipe: toward the left reads on, or toward the right for a right-to-left comic.
 It does nothing while the page is zoomed in or the panel editor is open; Scroll scrolls instead.
 
+To jump to a page in any mode, type its number and press Return; the status line shows the digits
+until about 1.5 s after the last one. Return with nothing typed keeps its meaning (on the last page,
+the next issue). ⌘F toggles full screen, as does View > Enter Full Screen (⌃⌘F).
+
 ## Night filters
 
 For reading late, the moon menu in the reader's top bar (or Settings, ⌘,) changes the pages, never
