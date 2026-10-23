@@ -1,4 +1,5 @@
 import Foundation
+import AppKit
 import CoreServices
 import UniformTypeIdentifiers
 import ChikaCore
@@ -32,6 +33,13 @@ final class LibraryStore: ObservableObject {
     private var unresolved: [Data] = []
     private var stream: FSEventStreamRef?
     private static let bookmarksKey = "chika.bookmarks.v1"
+    /// Paths of the comics with a reader window open, in the order they opened, saved on every change.
+    private var openComics: [String] = []
+    /// Last session's open comics, until the first library window reopens them.
+    private var toReopen: [String]
+    private var quitting = false
+    private var quitObserver: NSObjectProtocol?
+    private static let openComicsKey = "chika.openComics.v1"
     // PDFs are left out of folder scans (a watched Downloads folder is full of them); add one directly.
     static let inPlaceExtensions: Set = ["cbz", "cbr", "cb7"]
 
@@ -55,6 +63,7 @@ final class LibraryStore: ObservableObject {
         dir = directory ?? FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("Comics", isDirectory: true)
         self.defaults = defaults
+        toReopen = defaults.stringArray(forKey: Self.openComicsKey) ?? []
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         ReadingProgress.migrateLegacy(in: dir)
         // shortcut: a bookmark that no longer resolves (file deleted, drive unplugged) is kept but
@@ -62,10 +71,16 @@ final class LibraryStore: ObservableObject {
         for data in defaults.array(forKey: Self.bookmarksKey) as? [Data] ?? [] { resolve(data) }
         watch()
         refresh()
+        // Windows may disappear while quitting; those are the ones to reopen, so they stay saved.
+        quitObserver = NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification, object: nil,
+                                                              queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.quitting = true }
+        }
     }
 
     deinit {
         if let stream { FSEventStreamStop(stream); FSEventStreamInvalidate(stream); FSEventStreamRelease(stream) }
+        if let quitObserver { NotificationCenter.default.removeObserver(quitObserver) }
     }
 
     // shortcut: scans on the main thread; move off it if watched folders grow to many thousands of files.
@@ -126,6 +141,28 @@ final class LibraryStore: ObservableObject {
         }
         CoverLoader.evict(url)
         refresh()
+    }
+
+    // MARK: - Reopen at launch
+
+    // Paths, not bookmarks: every comic is an imported copy or under a bookmark resolved at launch.
+    func readerOpened(_ url: URL) {
+        openComics.removeAll { $0 == url.path }
+        openComics.append(url.path)
+        defaults.set(openComics, forKey: Self.openComicsKey)
+    }
+
+    func readerClosed(_ url: URL) {
+        guard !quitting else { return }
+        openComics.removeAll { $0 == url.path }
+        defaults.set(openComics, forKey: Self.openComicsKey)
+    }
+
+    /// The comics whose readers were open at the last quit and are still in the library, in the order
+    /// they opened. Once per launch: a library window opened later gets none.
+    func takeComicsToReopen() -> [URL] {
+        defer { toReopen = [] }
+        return toReopen.compactMap { path in comics.first { $0.path == path } }
     }
 
     // MARK: - Series

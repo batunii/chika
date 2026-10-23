@@ -24,10 +24,14 @@ struct ChikaApp: App {
             if let url { ReaderView(comicURL: url).environmentObject(settings).environmentObject(readers).environmentObject(library) }
         }
         .handlesExternalEvents(matching: [])
+        // LibraryStore reopens the readers open at quit itself, whatever the system's "close windows when
+        // quitting" setting, and never one whose comic is gone; SwiftUI's restoration would do neither.
+        .restorationBehavior(.disabled)
         WindowGroup("Peek", id: "peek", for: URL.self) { $url in
             if let url { PeekView(comicURL: url).environmentObject(settings).environmentObject(readers) }
         }
         .handlesExternalEvents(matching: [])
+        .restorationBehavior(.disabled)
         .windowStyle(.hiddenTitleBar)   // titled underneath so it takes keys; the chrome is hidden in PeekView
         .windowLevel(.floating)
         .windowResizability(.contentSize)

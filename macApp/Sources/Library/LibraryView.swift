@@ -82,7 +82,11 @@ struct LibraryView: View {
         } message: {
             Text(pendingDelete.map(removalMessage) ?? "")
         }
-        .onAppear { progress = ReadingProgress.all(); opened = ReadingProgress.openedMap() }
+        .onAppear {
+            progress = ReadingProgress.all()
+            opened = ReadingProgress.openedMap()
+            for url in library.takeComicsToReopen() { openWindow(id: "reader", value: url) }
+        }
         // Reader windows save progress and recency on every step; keep cards and order live.
         .onReceive(NotificationCenter.default.publisher(for: ReadingProgress.didChange)) { _ in
             progress = ReadingProgress.all()

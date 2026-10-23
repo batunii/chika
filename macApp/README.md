@@ -51,6 +51,13 @@ To jump to a page in any mode, type its number and press Return; the status line
 until about 1.5 s after the last one. Return with nothing typed keeps its meaning (on the last page,
 the next issue). ⌘F toggles full screen, as does View > Enter Full Screen (⌃⌘F).
 
+## Reopen at launch
+
+Quitting with reader windows open and launching again reopens them, each at its saved page and panel,
+whatever the system's "Close windows when quitting an application" setting. A comic deleted (or no
+longer in the library) since is skipped, and peek windows are not reopened. The list is saved as reader
+windows open and close (`chika.openComics.v1` in the app's defaults), so it also survives a crash.
+
 ## Night filters
 
 For reading late, the moon menu in the reader's top bar (or Settings, ⌘,) changes the pages, never

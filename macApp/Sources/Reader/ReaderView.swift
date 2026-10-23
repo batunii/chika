@@ -12,11 +12,12 @@ struct ReaderView: View {
     let comicURL: URL
     @EnvironmentObject private var readers: ReaderModels
     @EnvironmentObject private var settings: ChikaSettings
+    @EnvironmentObject private var library: LibraryStore
 
     var body: some View {
         ReaderContent(model: readers.model(for: comicURL, settings: settings))
-            .onAppear { readers.attach(comicURL); ReadingProgress.markOpened(comicURL) }
-            .onDisappear { readers.detach(comicURL) }
+            .onAppear { readers.attach(comicURL); ReadingProgress.markOpened(comicURL); library.readerOpened(comicURL) }
+            .onDisappear { readers.detach(comicURL); library.readerClosed(comicURL) }
     }
 }
 
