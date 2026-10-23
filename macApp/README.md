@@ -251,6 +251,13 @@ the search field has text.
   files appear by themselves
   (PDFs are not picked up from folders; add them one by one). Removing one only forgets the bookmark; the files are never touched.
   A CBR or CB7 read in place is converted once into `Library/Caches/Chika/Converted` inside the container.
+- **A folder of images** is one comic, its pages the folder's own image files (jpg, png, webp, gif,
+  bmp, avif) in natural order (p2 before p10); subfolders and other files are not read. Imported (⌘O),
+  those images are copied in as one CBZ named after the folder. Read in place (⇧⌘O, or dropped), a
+  folder holding nothing but images (hidden files aside) is one comic rather than a folder to watch,
+  and inside a watched folder each subfolder holding nothing but images shows as one comic too. A
+  folder mixing images with anything else (a text file, an archive, a subfolder) is not a comic; its
+  archives are listed as usual.
 - **Progress** is a SQLite table at `Library/Application Support/Chika/progress.sqlite` inside the
   container, keyed by file identity (volume UUID + inode), so renaming a comic keeps its place. The
   first launch copies the old UserDefaults progress over and leaves it for the Catalyst app.

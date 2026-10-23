@@ -2,6 +2,7 @@ import Foundation
 import AppKit
 import CoreServices
 import UniformTypeIdentifiers
+import ZIPFoundation
 import ChikaCore
 
 /// Comics come from two places. Imported copies live as plain .cbz files in the container's
@@ -90,11 +91,7 @@ final class LibraryStore: ObservableObject {
             .filter { ["cbz", "zip", "pdf"].contains($0.pathExtension.lowercased()) }
         sources = [:]
         for root in roots {
-            let found = root.isFolder
-                ? (fm.enumerator(at: root.url, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles, .skipsPackageDescendants])?
-                    .compactMap { $0 as? URL }
-                    .filter { Self.inPlaceExtensions.contains($0.pathExtension.lowercased()) } ?? [])
-                : (fm.fileExists(atPath: root.url.path) ? [root.url] : [])
+            let found = root.isFolder ? Self.scan(root.url) : (fm.fileExists(atPath: root.url.path) ? [root.url] : [])
             for url in found where sources[url] == nil {
                 sources[url] = root.url
                 files.append(url)
@@ -103,6 +100,22 @@ final class LibraryStore: ObservableObject {
         comics = files
         keys = Dictionary(files.map { ($0, ReadingProgress.key($0)) }, uniquingKeysWith: { a, _ in a })
         readInfo()
+    }
+
+    /// A watched folder's comics: archives anywhere under it, and each subfolder holding only images as one comic.
+    private static func scan(_ folder: URL) -> [URL] {
+        guard let walk = FileManager.default.enumerator(at: folder, includingPropertiesForKeys: [.isDirectoryKey],
+                                                        options: [.skipsHiddenFiles, .skipsPackageDescendants]) else { return [] }
+        var found: [URL] = []
+        while let url = walk.nextObject() as? URL {
+            if inPlaceExtensions.contains(url.pathExtension.lowercased()) {
+                found.append(url)
+            } else if (try? url.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true, FolderComic.isComic(url) {
+                found.append(url)
+                walk.skipDescendants()
+            }
+        }
+        return found
     }
 
     /// Imports off the main thread. The returned task lets tests await completion; the UI ignores it.
@@ -249,7 +262,8 @@ final class LibraryStore: ObservableObject {
 
     // MARK: - Read in place
 
-    /// A dropped or opened folder is watched in place; a file is imported as a copy.
+    /// A dropped or opened folder is read in place (watched, or one comic when it holds only images);
+    /// a file is imported as a copy.
     func add(_ url: URL) {
         let isFolder = (try? url.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory ?? false
         if isFolder { addInPlace(url) } else { importComic(from: url) }
@@ -281,7 +295,8 @@ final class LibraryStore: ObservableObject {
         }
         _ = url.startAccessingSecurityScopedResource()
         let fresh = stale ? (try? url.bookmarkData(options: .withSecurityScope, includingResourceValuesForKeys: nil, relativeTo: nil)) ?? data : data
-        let isFolder = (try? url.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory ?? false
+        // A folder of nothing but images is one comic, not a folder to watch.
+        let isFolder = (try? url.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true && !FolderComic.isComic(url)
         roots.append((url, fresh, isFolder))
         if stale { saveBookmarks() }
     }
@@ -312,7 +327,7 @@ final class LibraryStore: ObservableObject {
         case unsupported, noImages
         var errorDescription: String? {
             switch self {
-            case .unsupported: return "Choose a CBZ, CBR, CB7, PDF, ZIP, RAR or 7z comic."
+            case .unsupported: return "Choose a CBZ, CBR, CB7, PDF, ZIP, RAR or 7z comic, or a folder of images."
             case .noImages: return "No image pages found in this archive."
             }
         }
@@ -326,27 +341,40 @@ final class LibraryStore: ObservableObject {
         // On the library's volume, so the final rename below is atomic.
         let staging = try fm.url(for: .itemReplacementDirectory, in: .userDomainMask, appropriateFor: dir, create: true)
         defer { try? fm.removeItem(at: staging) }
+        let isFolder = (try? url.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory ?? false
         let source = staging.appendingPathComponent("source").appendingPathExtension(url.pathExtension)
         var coordinationError: NSError?
         var copyError: Error?
         NSFileCoordinator().coordinate(readingItemAt: url, options: .withoutChanges, error: &coordinationError) { readableURL in
-            do { try fm.copyItem(at: readableURL, to: source) }
-            catch { copyError = error }
+            do {
+                if isFolder {
+                    // Only its pages, as the folder reads in place: subfolders and other files stay behind.
+                    let pages = try FolderComic.pages(in: readableURL)
+                    guard !pages.isEmpty else { throw ImportError.noImages }
+                    try fm.createDirectory(at: source, withIntermediateDirectories: false)
+                    for page in pages { try fm.copyItem(at: page, to: source.appendingPathComponent(page.lastPathComponent)) }
+                } else {
+                    try fm.copyItem(at: readableURL, to: source)
+                }
+            } catch { copyError = error }
         }
         if let error = coordinationError ?? copyError { throw error }
 
         // Route by magic bytes (extension is only the fallback), matching Android's
         // ComicArchiveFactory, so a mislabeled ".cbz" that is really a RAR is converted.
-        let format = ComicFormatDetector.detect(head: ComicOpener.leadingBytes(of: source), fileExtension: url.pathExtension)
+        let format: ComicFormat = isFolder ? .cbz
+            : ComicFormatDetector.detect(head: ComicOpener.leadingBytes(of: source), fileExtension: url.pathExtension)
         let ready = staging.appendingPathComponent("ready").appendingPathExtension(format == .pdf ? "pdf" : "cbz")
         switch format {
         case .cbr, .cb7: try CbrConverter.convertToCbz(source: source, destination: ready)
+        // Pages are already compressed: store them.
+        case .cbz where isFolder: try fm.zipItem(at: source, to: ready, shouldKeepParent: false, compressionMethod: .none)
         case .cbz, .pdf: try fm.moveItem(at: source, to: ready)
         case .unknown: throw ImportError.unsupported
         }
         guard try ComicOpener.open(ready).pageCount > 0 else { throw ImportError.noImages }
 
-        let base = url.deletingPathExtension().lastPathComponent
+        let base = isFolder ? url.lastPathComponent : url.deletingPathExtension().lastPathComponent
         var n = 1
         while true {
             let dest = dir.appendingPathComponent(n == 1 ? base : "\(base) \(n)").appendingPathExtension(ready.pathExtension)

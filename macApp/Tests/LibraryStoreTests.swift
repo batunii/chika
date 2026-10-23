@@ -234,6 +234,60 @@ final class LibraryStoreTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: first.path))
     }
 
+    /// A folder holding two of the test comic's pages as p2.jpg and p10.jpg (only natural order reads p2
+    /// first) and a hidden file; returns the pages' bytes in reading order.
+    private func makeImageFolder(_ folder: URL) throws -> [Data] {
+        let source = try ComicOpener.open(comic)
+        let pages = [try source.readPage(0), try source.readPage(1)]
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        try pages[0].write(to: folder.appendingPathComponent("p2.jpg"))
+        try pages[1].write(to: folder.appendingPathComponent("p10.jpg"))
+        try Data().write(to: folder.appendingPathComponent(".DS_Store"))
+        return pages
+    }
+
+    func testAFolderOfImagesImportsAsACbzOrReadsInPlaceAsOneComic() async throws {
+        let root = dir.appendingPathExtension("images")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let folder = root.appendingPathComponent("Pages")
+        let pages = try makeImageFolder(folder)
+        let store = LibraryStore(directory: dir, defaults: ReadingProgress.defaults)
+
+        await store.importComic(from: folder).value
+        XCTAssertNil(store.importError)
+        XCTAssertEqual(try files(), ["Pages.cbz"])
+        let copy = try ComicOpener.open(dir.appendingPathComponent("Pages.cbz"))
+        XCTAssertEqual(copy.pageCount, 2)
+        XCTAssertEqual(try copy.readPage(0), pages[0])
+
+        store.addInPlace(folder)
+        let inPlace = try XCTUnwrap(store.comics.first { $0.lastPathComponent == "Pages" })
+        XCTAssertEqual(store.sources[inPlace], inPlace)   // one comic, not a watched folder
+        let read = try ComicOpener.open(inPlace)
+        XCTAssertEqual(read.pageCount, 2)
+        XCTAssertEqual(try [read.readPage(0), read.readPage(1)], pages)
+    }
+
+    func testAWatchedFolderReadsASubfolderOfOnlyImagesAsOneComic() throws {
+        let root = dir.appendingPathExtension("watched")
+        defer { try? FileManager.default.removeItem(at: root) }
+        _ = try makeImageFolder(root.appendingPathComponent("Pages"))
+        _ = try makeImageFolder(root.appendingPathComponent("Mixed"))
+        try Data("notes".utf8).write(to: root.appendingPathComponent("Mixed/notes.txt"))
+        try FileManager.default.copyItem(at: comic, to: root.appendingPathComponent("Pages/Inside.cbz"))
+        try FileManager.default.copyItem(at: comic, to: root.appendingPathComponent("One.cbz"))
+        let store = LibraryStore(directory: dir, defaults: ReadingProgress.defaults)
+
+        store.addInPlace(root)
+        // Pages holds an archive too, so it is not one comic: its archive is listed instead.
+        XCTAssertEqual(Set(store.comics.map(\.lastPathComponent)), ["One.cbz", "Inside.cbz"])
+
+        try FileManager.default.removeItem(at: root.appendingPathComponent("Pages/Inside.cbz"))
+        store.refresh()
+        XCTAssertEqual(Set(store.comics.map(\.lastPathComponent)), ["One.cbz", "Pages"])
+        XCTAssertEqual(try ComicOpener.open(try XCTUnwrap(store.comics.first { $0.lastPathComponent == "Pages" })).pageCount, 2)
+    }
+
     func testComicInfoGroupsSeriesAndFindsTheNextIssue() async throws {
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         func make(_ name: String, number: String?) throws -> URL {

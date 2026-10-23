@@ -53,7 +53,8 @@ struct LibraryView: View {
         // One importer for both modes: SwiftUI only honours one .fileImporter per view.
         .fileImporter(
             isPresented: $showPicker,
-            allowedContentTypes: LibraryStore.importableTypes + (pickMode == .inPlace ? [.folder] : []),
+            // Folders in both: a folder of images imports as one comic.
+            allowedContentTypes: LibraryStore.importableTypes + [.folder],
             allowsMultipleSelection: true
         ) { result in
             switch result {
@@ -194,7 +195,7 @@ struct LibraryView: View {
                 .padding(.bottom, 8)
             Text("YOUR LIBRARY STARTS HERE")
                 .font(.anton(30)).foregroundColor(Chika.cream)
-            Text("Import a CBZ, CBR, CB7 or PDF comic to begin reading.")
+            Text("Import a CBZ, CBR, CB7 or PDF comic, or a folder of images, to begin reading.")
                 .font(.archivo(15)).foregroundColor(Chika.creamMuted)
             importButton.padding(.top, 4)
             Text("⌘O to import copies, ⇧⌘O to read files or folders in place, or drop them here")

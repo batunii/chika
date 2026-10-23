@@ -11,12 +11,14 @@ extension CbzArchive: ComicPages {}
 
 /// Opens any library comic for reading. Imported CBR/CB7 copies are already CBZ; one read in place
 /// is converted once into the caches folder (keyed by file identity) and again only when it
-/// changes. PDFs open with PDFKit. Blocking: call it off the main thread.
+/// changes. PDFs open with PDFKit, a folder of images as its image files. Blocking: call it off the main thread.
 enum ComicOpener {
     static let cacheDir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
         .appendingPathComponent("Chika/Converted", isDirectory: true)
 
     static func open(_ url: URL) throws -> ComicPages {
+        // A folder has no leading bytes to detect: it is a folder of images.
+        if (try? url.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true { return try FolderComic(url: url) }
         switch ComicFormatDetector.detect(head: leadingBytes(of: url), fileExtension: url.pathExtension) {
         case .pdf: return try PdfComic(url: url)
         case .cbr, .cb7: return try CbzArchive(url: converted(url))
