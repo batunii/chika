@@ -42,6 +42,7 @@ private struct ReaderContent: View {
     // The panel editor replaces the page and both bars (so their Esc and Return shortcuts are gone).
     @State private var editing = false
     @StateObject private var translator = BalloonTranslator()
+    @StateObject private var speaker = BalloonSpeaker()
 
     private var isReady: Bool { model.state == .ready }
     private var marked: Bool { !model.marksHere.isEmpty }
@@ -103,6 +104,8 @@ private struct ReaderContent: View {
                     .keyboardShortcut("e", modifiers: [.command, .shift])
                 Button("Edit panels") { editPanels() }
                     .keyboardShortcut("e", modifiers: .command)
+                Button("Read aloud") { toggleReadAloud() }
+                    .keyboardShortcut("r", modifiers: [.command, .shift])
             }
             .disabled(editing)
             .opacity(0)
@@ -127,14 +130,66 @@ private struct ReaderContent: View {
         }
         // The peek holds auto-advance while the editor is open (and not after this window closes mid-edit).
         .onChange(of: editing) { model.editingPanels = editing }
-        .onDisappear { model.editingPanels = false }
-        // Translate follows the pages on screen once they (and in Panels mode their panels) are in.
-        .onChange(of: [translator.isOn, model.waitingForPage, settings.translationTarget, model.rightToLeft,
+        .onDisappear { model.editingPanels = false; speaker.isOn = false }
+        // Translate (and Read aloud's text) follows the pages on screen once they (and in Panels mode their panels) are in.
+        .onChange(of: [translator.isOn, speaker.isOn, model.waitingForPage, settings.translationTarget, model.rightToLeft,
                        model.pageImages.map(\.page)] as [AnyHashable], initial: true) {
             translator.show(model.waitingForPage ? [] : model.pageImages, of: model.comicURL,
-                            revision: model.revision, rtl: model.rightToLeft, target: settings.targetLanguage)
+                            revision: model.revision, rtl: model.rightToLeft, target: settings.targetLanguage,
+                            aloud: speaker.isOn)
         }
         .translationTask(translator.configuration) { session in await translator.translate(with: session) }
+        // Read aloud: each view's balloons, then one step on, like the arrow key; any step starts the new view.
+        .onChange(of: [speaker.isOn, aloudKey, aloudLines] as [AnyHashable], initial: true) {
+            speaker.update(key: aloudKey, lines: aloudLines, wait: model.mode == .panels && !model.slots.onPanel ? 0.6 : 1.5)
+        }
+        .onChange(of: settings.speechRate, initial: true) { speaker.rate = settings.speechRate }
+        .onChange(of: model.mode) { if model.mode == .scroll { speaker.isOn = false } }
+        .onAppear {
+            speaker.onDone = { [model, weak speaker] in
+                // Blocked here is the end of the book: the view was in, so it is not waiting for detection.
+                if model.advance(by: 1) == .blocked { speaker?.isOn = false }
+            }
+        }
+    }
+
+    private func toggleReadAloud() {
+        guard model.mode != .scroll else { NSSound.beep(); return }
+        speaker.isOn.toggle()
+    }
+
+    /// The view Read aloud is on: a new one interrupts the speech.
+    private var aloudKey: [AnyHashable] {
+        [model.mode, model.visiblePages, model.mode == .panels ? model.slots.step : 0,
+         model.mode == .panels ? model.slots.camera : .fullPage, editing]
+    }
+
+    /// Read aloud's lines for the view on screen in reading order: in Panels mode the balloons of the
+    /// panel on screen (none on a whole-page slot, its panels read them), in Two pages every balloon of
+    /// each page. Nil until the view, its panels and its balloons' text are in, or while editing panels.
+    private var aloudLines: [BalloonSpeaker.Line]? {
+        guard speaker.isOn, !editing, !model.waitingForPage, !translator.reading, !model.pageImages.isEmpty else { return nil }
+        let panels = model.mode == .panels
+        return model.visiblePages.flatMap { page in
+            let read = translator.balloons[page] ?? []
+            let boxes = BalloonText.balloons(read.map(\.box), inRegion: panels ? model.slots.step : 0,
+                                             of: panels ? model.slots.regions ?? [] : [.fullPage], rightToLeft: model.rightToLeft)
+            return boxes.compactMap { box in
+                read.first { $0.box == box }.flatMap {
+                    BalloonSpeaker.line($0, page: page, translate: translator.isOn, target: settings.targetLanguage)
+                }
+            }
+        }
+    }
+
+    /// Translate's labels for a page, only while Translate is on (Read aloud reads the text without it).
+    private func labels(_ page: Int) -> [BalloonTranslator.Balloon] {
+        translator.isOn ? translator.balloons[page] ?? [] : []
+    }
+
+    /// Read aloud's outline, on the page it is speaking from.
+    private func spoken(_ page: Int) -> Panel? {
+        speaker.current.flatMap { $0.page == page ? $0.box : nil }
     }
 
     /// One reading step: a panel, a spread, or (scroll mode) most of a screen.
@@ -207,7 +262,8 @@ private struct ReaderContent: View {
                 Image(decorative: cg, scale: 1)
                     .resizable()
                     .frame(width: CGFloat(cg.width), height: CGFloat(cg.height))
-                    .overlay { BalloonLabels(balloons: translator.balloons[model.imagePages.first ?? -1] ?? []) }
+                    .overlay { BalloonLabels(balloons: labels(model.imagePages.first ?? -1)) }
+                    .overlay { SpokenBalloon(box: spoken(model.imagePages.first ?? -1)) }
                     // Here dim darkens around the panel instead: drawn in page coordinates under the
                     // same transform, so it stays on the panel through camera tweens, zoom and pan.
                     .modifier(NightFilterEffect(filter: around ? .off : filter))
@@ -235,7 +291,8 @@ private struct ReaderContent: View {
         return HStack(spacing: 0) {
             ForEach(Array((model.rightToLeft ? pages.reversed() : pages).enumerated()), id: \.offset) { _, page in
                 Image(decorative: page.1, scale: 1).resizable().scaledToFit()
-                    .overlay { BalloonLabels(balloons: translator.balloons[page.0] ?? []) }
+                    .overlay { BalloonLabels(balloons: labels(page.0)) }
+                    .overlay { SpokenBalloon(box: spoken(page.0)) }
             }
         }
         .modifier(NightFilterEffect(filter: settings.nightFilter))
@@ -247,7 +304,9 @@ private struct ReaderContent: View {
     }
 
     // Top-bar status line, matching Android: "Page X/Y · panel N/M" / "· full page" / "· detecting…".
-    private var pageStatus: String { pagePosition + (translator.status.map { " · " + $0 } ?? "") }
+    private var pageStatus: String {
+        pagePosition + (translator.status.map { " · " + $0 } ?? "") + (speaker.isOn ? " · reading aloud" : "")
+    }
 
     private var pagePosition: String {
         if model.mode == .scroll { return "Page \(model.slots.page + 1)/\(model.pageCount) · scroll" }
@@ -364,6 +423,17 @@ private struct ReaderContent: View {
             .help(model.mode == .scroll ? "Translate works in Panels and Two pages" : "Translate the speech balloons (⇧⌘T); hover one for the original")
             .accessibilityLabel("Translate")
             .accessibilityValue(translator.isOn ? "On" : "Off")
+            .disabled(model.mode == .scroll)
+            Button { toggleReadAloud() } label: {
+                Image(systemName: speaker.isOn ? "speaker.wave.2.fill" : "speaker.wave.2")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundColor(Chika.cream)
+                    .frame(width: 38, height: 38)
+            }
+            .help(model.mode == .scroll ? "Read aloud works in Panels and Two pages"
+                  : "Read the balloons aloud and step on by itself (⇧⌘R); speed in Settings")
+            .accessibilityLabel("Read aloud")
+            .accessibilityValue(speaker.isOn ? "On" : "Off")
             .disabled(model.mode == .scroll)
             DirectionChip(rightToLeft: model.rightToLeft) { model.toggleDirection() }
             Button { openWindow(id: "peek", value: model.comicURL) } label: {

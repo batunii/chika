@@ -107,6 +107,25 @@ struct SettingsView: View {
                     .background(Chika.inkSoft)
                     .clipShape(RoundedCornerShape(cornerRadius: 6))
 
+                    Spacer().frame(height: 10)
+                    HStack(spacing: 12) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Read aloud speed").font(.archivo(14, weight: 700)).foregroundColor(Chika.cream)
+                            Text("How fast ⇧⌘R in the reader speaks the balloons.")
+                                .font(.archivo(10.5, weight: 500)).lineSpacing(3).foregroundColor(Chika.creamMuted)
+                        }
+                        Spacer(minLength: 0)
+                        // The ends of AVSpeechUtterance's full range are too slow or too fast to follow.
+                        Slider(value: $settings.speechRate, in: 0.2...0.8)
+                            .tint(Chika.ochre)
+                            .frame(width: 140)
+                            .help("Read aloud speed")
+                            .accessibilityLabel("Read aloud speed")
+                    }
+                    .padding(.init(top: 12, leading: 16, bottom: 12, trailing: 10))
+                    .background(Chika.inkSoft)
+                    .clipShape(RoundedCornerShape(cornerRadius: 6))
+
                     Spacer().frame(height: 32)
 
                     // ---- About -------------------------------------------------------

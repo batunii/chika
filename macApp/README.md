@@ -136,6 +136,18 @@ Recognized text is stored per comic, page and balloon in the progress database (
 `BalloonReader.version`: bump it when recognition changes), translations per text and target
 language, so a page is only read and translated once. Both go when an imported comic is deleted.
 
+## Read aloud
+
+The speaker button in the reader's top bar (⇧⌘R) reads the speech balloons out loud, one at a time,
+in Panels and Two pages (turning to Scroll or closing the window stops it). It uses Translate's text
+recognition and stored text, so a page read for one is not read again for the other: the translation
+when Translate is on and has one, else the text off the page, in a voice for that text's language (the
+system voice when there is none). The balloon being spoken is outlined. In Panels mode it reads the
+balloons of the panel on screen (each balloon belongs to the panel it overlaps most), in Two pages
+every balloon of the spread, in reading order; then it steps on like the arrow key and carries on, to
+the end of the comic. A panel with no text gets about 1.5 s, a whole-page view a short beat. Stepping
+by hand cuts the balloon off and carries on from the new place. Settings (⌘,) sets the speed.
+
 ## Training export
 
 File > Export Panel Corrections… turns pages fixed in the panel editor into training data for the

@@ -48,6 +48,24 @@ public enum BalloonText {
         return (UInt8(top.r / top.count), UInt8(top.g / top.count), UInt8(top.b / top.count))
     }
 
+    /// Read aloud: the balloons read while region `step` of `regions` is on screen, in reading order.
+    /// Each balloon belongs to the one region it overlaps most (the nearest when it overlaps none), so
+    /// a balloon inside two padded, overlapping regions is read once. A step off the regions (a
+    /// whole-page slot) reads none; pass `[.fullPage]` and step 0 for a whole page.
+    public static func balloons(_ balloons: [Panel], inRegion step: Int, of regions: [Panel], rightToLeft: Bool) -> [Panel] {
+        guard regions.indices.contains(step) else { return [] }
+        return PanelOrdering.order(balloons.filter { owner(of: $0, in: regions) == step }, rightToLeft: rightToLeft)
+    }
+
+    private static func owner(of balloon: Panel, in regions: [Panel]) -> Int {
+        func rank(_ r: Panel) -> (Float, Float) {
+            let overlap = max(min(balloon.right, r.right) - max(balloon.left, r.left), 0)
+                * max(min(balloon.bottom, r.bottom) - max(balloon.top, r.top), 0)
+            return (-overlap, hypot(balloon.centerX - r.centerX, balloon.centerY - r.centerY))
+        }
+        return regions.indices.min { rank(regions[$0]) < rank(regions[$1]) }!
+    }
+
     /// Dark lettering on light paper, light on dark.
     public static func inkIsDark(on paper: (r: UInt8, g: UInt8, b: UInt8)) -> Bool {
         0.299 * Double(paper.r) + 0.587 * Double(paper.g) + 0.114 * Double(paper.b) > 128

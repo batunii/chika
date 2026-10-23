@@ -1,4 +1,5 @@
 import SwiftUI
+import AVFoundation
 
 /// Night filters for reading late, applied to page pixels only (never the chrome): inverted colours
 /// with hues kept, warm monochrome, or dimming (around the current panel in Panels mode).
@@ -18,6 +19,7 @@ final class ChikaSettings: ObservableObject {
     private static let directionKey = "chika.readingDirection.default.rtl"
     private static let nightFilterKey = "chika.nightFilter"
     private static let translationTargetKey = "chika.translationTarget"
+    private static let speechRateKey = "chika.speechRate"
     private let defaults = UserDefaults.standard
 
     @Published var amoled: Bool {
@@ -40,6 +42,11 @@ final class ChikaSettings: ObservableObject {
         didSet { defaults.set(translationTarget, forKey: Self.translationTargetKey) }
     }
 
+    /// Read aloud's AVSpeechUtterance rate, the system's default rate until changed.
+    @Published var speechRate: Float {
+        didSet { defaults.set(speechRate, forKey: Self.speechRateKey) }
+    }
+
     var targetLanguage: Locale.Language {
         translationTarget.isEmpty ? Locale.current.language : Locale.Language(identifier: translationTarget)
     }
@@ -49,6 +56,7 @@ final class ChikaSettings: ObservableObject {
         defaultRightToLeft = defaults.bool(forKey: Self.directionKey)
         nightFilter = defaults.string(forKey: Self.nightFilterKey).flatMap(NightFilter.init(rawValue:)) ?? .off
         translationTarget = defaults.string(forKey: Self.translationTargetKey) ?? ""
+        speechRate = defaults.object(forKey: Self.speechRateKey) as? Float ?? AVSpeechUtteranceDefaultSpeechRate
     }
 
     /// Full-screen ground: true black in AMOLED, brand ink otherwise.

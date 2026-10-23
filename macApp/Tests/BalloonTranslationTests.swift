@@ -117,4 +117,20 @@ final class BalloonTranslationTests: XCTestCase {
         XCTAssertTrue(translator.balloons.isEmpty)
         XCTAssertNil(translator.configuration)
     }
+
+    // Read aloud wants the text without Translate: the balloons are read, nothing is sent to translate.
+    func testReadAloudReadsTheTextWithTranslateOff() async throws {
+        let url = dir.appendingPathComponent("A.cbz")
+        try FileManager.default.copyItem(at: comic, to: url)
+        ReadingProgress.setDetection(url, page: 0, PageDetection(leftToRight: [.fullPage], rightToLeft: [.fullPage], bubbles: [balloon]),
+                                     revision: ReadingProgress.revision(url))
+        let translator = BalloonTranslator()
+        translator.show([(0, page())], of: url, revision: ReadingProgress.revision(url), rtl: false,
+                        target: Locale.Language(identifier: "en"), aloud: true)
+        XCTAssertNil(translator.status)   // reading for Read aloud is not "translating…"
+        let deadline = Date.now + 30
+        while translator.reading, Date.now < deadline { try await Task.sleep(for: .milliseconds(20)) }
+        XCTAssertTrue(try XCTUnwrap(translator.balloons[0]?.first).original.contains("天気"))
+        XCTAssertNil(translator.configuration)
+    }
 }

@@ -48,4 +48,24 @@ struct BalloonTextTests {
         #expect(!BalloonText.inkIsDark(on: BalloonText.paperColor(rgba: black)))
         #expect(BalloonText.paperColor(rgba: []) == (255, 255, 255))
     }
+
+    @Test func eachBalloonIsReadWithTheRegionItOverlapsMost() {
+        let top = Panel(0, 0, 1, 0.55), bottom = Panel(0, 0.45, 1, 1)   // padded: they overlap
+        let a = Panel(0.1, 0.1, 0.3, 0.3), b = Panel(0.6, 0.1, 0.8, 0.3)
+        let straddling = Panel(0.4, 0.4, 0.6, 0.52)   // mostly in the top region
+        let low = Panel(0.2, 0.7, 0.4, 0.9)
+        #expect(BalloonText.balloons([low, b, straddling, a], inRegion: 0, of: [top, bottom], rightToLeft: false) == [a, b, straddling])
+        #expect(BalloonText.balloons([low, b, straddling, a], inRegion: 0, of: [top, bottom], rightToLeft: true) == [b, a, straddling])
+        #expect(BalloonText.balloons([low, b, straddling, a], inRegion: 1, of: [top, bottom], rightToLeft: false) == [low])
+    }
+
+    @Test func aBalloonOutsideEveryRegionGoesToTheNearestAndWholePageSlotsReadNone() {
+        let left = Panel(0, 0, 0.4, 1), right = Panel(0.6, 0, 1, 1)
+        let gap = Panel(0.45, 0.4, 0.58, 0.5)   // in the gutter, nearer the right region
+        #expect(BalloonText.balloons([gap], inRegion: 1, of: [left, right], rightToLeft: false) == [gap])
+        #expect(BalloonText.balloons([gap], inRegion: 0, of: [left, right], rightToLeft: false).isEmpty)
+        #expect(BalloonText.balloons([gap], inRegion: -1, of: [left, right], rightToLeft: false).isEmpty)
+        #expect(BalloonText.balloons([gap], inRegion: 2, of: [left, right], rightToLeft: false).isEmpty)
+        #expect(BalloonText.balloons([gap], inRegion: 0, of: [.fullPage], rightToLeft: false) == [gap])
+    }
 }

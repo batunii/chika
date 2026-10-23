@@ -74,19 +74,22 @@ final class BalloonTranslator: ObservableObject {
     private var work: Task<Void, Never>?
 
     /// The top bar's note, nil when there is nothing to say.
-    var status: String? { failed ? "can't translate" : reading || translating ? "translating…" : nil }
+    var status: String? { failed ? "can't translate" : (reading && isOn) || translating ? "translating…" : nil }
 
     /// Reads (or recalls) the balloons of `pages` and asks for their translations into `target`.
     /// Pass no pages to clear. Work for the pages shown before stops. `revision` is the reader's
-    /// (ReaderModel.revision): what is read is stored only while the file still matches it.
-    func show(_ pages: [(page: Int, image: CGImage)], of url: URL, revision: String?, rtl: Bool, target: Locale.Language) {
+    /// (ReaderModel.revision): what is read is stored only while the file still matches it. `aloud`:
+    /// Read aloud wants the text, so the balloons are read even with Translate off (and not translated).
+    func show(_ pages: [(page: Int, image: CGImage)], of url: URL, revision: String?, rtl: Bool, target: Locale.Language,
+              aloud: Bool = false) {
         work?.cancel()
         balloons = [:]
         failed = false
         reading = false
         self.url = url
         self.target = target
-        guard isOn, !pages.isEmpty else { configuration = nil; return }
+        if !isOn { configuration = nil }
+        guard isOn || aloud, !pages.isEmpty else { configuration = nil; return }
         reading = true
         let targetID = target.minimalIdentifier
         work = Task {
@@ -114,7 +117,7 @@ final class BalloonTranslator: ObservableObject {
                         darkInk: BalloonText.inkIsDark(on: paper),
                         translated: ReadingProgress.translation(url, source: text, target: targetID)))
                 }
-                requestTranslation()   // this page's balloons translate while the next page is read
+                if isOn { requestTranslation() }   // this page's balloons translate while the next page is read
             }
             reading = false
         }
