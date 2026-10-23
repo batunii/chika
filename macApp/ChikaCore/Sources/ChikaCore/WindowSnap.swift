@@ -32,6 +32,16 @@ public enum WindowSnap {
                        y: top ? inset.maxY - size.height : inset.minY)
     }
 
+    /// A window of `aspect`'s shape at `width`, scaled down (keeping the shape) to fit inside `area`'s
+    /// margins, since a webtoon page can be many screens tall; then no smaller than `minimum`, the
+    /// picture fitting inside.
+    public static func size(_ aspect: CGSize, width: CGFloat, in area: CGRect, minimum: CGSize = .zero) -> CGSize {
+        let room = area.insetBy(dx: margin, dy: margin).size
+        let height = width * aspect.height / aspect.width
+        let scale = min(1, room.width / width, room.height / height)
+        return CGSize(width: max(width * scale, minimum.width), height: max(height * scale, minimum.height))
+    }
+
     /// Where a window of `size` reopens, `saved` being its last frame on that screen: in the same
     /// corner if it was in one, else with the same top-left, pulled back inside `area` (keeping its
     /// top-left on screen if it is too big). Nil when `saved` is off the screen now (it shrank or

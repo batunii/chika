@@ -70,7 +70,7 @@ final class ReaderModel: ObservableObject {
     /// The bookmarks on screen: the one at `here` in panels mode, any on a visible page in Two pages and Scroll.
     var marksHere: [Bookmark] { bookmarks.filter { mode == .panels ? $0 == here : visiblePages.contains($0.page) } }
     /// The pages on screen with their images, once every one has loaded (Panels and Two pages; Scroll
-    /// never loads `image`).
+    /// loads `image` only for a peek).
     var pageImages: [(page: Int, image: CGImage)] {
         guard mode != .scroll, imagePages == visiblePages else { return [] }
         return zip(imagePages, [image, facing]).compactMap { page, image in image.map { (page, $0) } }
@@ -80,14 +80,12 @@ final class ReaderModel: ObservableObject {
     /// The panel editor (⌘E) needs Panels mode with this page and its panels on screen.
     var canEditPanels: Bool { mode == .panels && image != nil && imagePages == visiblePages && slots.regions != nil && !detecting }
     /// The comic is opening, or the page on screen still lacks its image or (panels mode) its panels:
-    /// peek auto-advance holds its wait until this clears.
-    // shortcut: Scroll skips the image check because the strip's scrolled(to:) never loads `image`; check it
-    // too once scrolled(to:) decodes the page.
+    /// peek auto-advance holds its wait until this clears. (Scroll loads `image` only for a peek.)
     var waitingForPage: Bool {
         switch state {
         case .loading: return true
         case .failed: return false
-        case .ready: return (mode != .scroll && imagePages != visiblePages) || (mode == .panels && slots.regions == nil)
+        case .ready: return imagePages != visiblePages || (mode == .panels && slots.regions == nil)
         }
     }
 
@@ -300,11 +298,12 @@ final class ReaderModel: ObservableObject {
         }
     }
 
-    /// Scroll mode: the page at the top of the strip is the reading position.
-    // shortcut: doesn't reload `image`, so a peek window opened in scroll mode keeps the page it
-    // started on; decode it here if peek and scroll get used together (it would slow fast flicks).
+    /// Scroll mode: the page at the top of the strip is the reading position. Its `image` (what a peek
+    /// shows) is decoded only while a peek of this comic is open, so plain scrolling stays fast.
     func scrolled(to page: Int) {
-        if page != slots.page { slots = ReaderSlots(page: page) }
+        guard page != slots.page else { return }
+        slots = ReaderSlots(page: page)
+        if ShortcutTarget.peeks.contains(comicURL) { loadPage() }
     }
 
     /// What is being read, as one image (Copy and Export Panel): the camera's crop of the page in

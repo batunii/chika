@@ -38,6 +38,21 @@ struct WindowSnapTests {
         #expect(WindowSnap.restore(CGRect(x: 3000, y: 0, width: 420, height: 300), size: loose.size, in: screen) == nil)
     }
 
+    @Test func aPageTallerThanTheScreenIsShrunkToFit() {
+        // A 128 x 2560 webtoon strip at 420 pt wide would be 8400 pt tall: down to the screen's
+        // height less the margins, keeping its shape.
+        let strip = CGSize(width: 128, height: 2560)
+        let fitted = WindowSnap.size(strip, width: 420, in: screen)
+        #expect(abs(fitted.height - 868) < 0.001)
+        #expect(abs(fitted.width - 43.4) < 0.001)
+        // Never narrower than the window can be: the strip fits inside.
+        let floored = WindowSnap.size(strip, width: 420, in: screen, minimum: CGSize(width: 240, height: 160))
+        #expect(floored.width == 240)
+        #expect(abs(floored.height - 868) < 0.001)
+        // A shape that fits keeps the width it was given.
+        #expect(WindowSnap.size(CGSize(width: 1400, height: 1000), width: 420, in: screen) == CGSize(width: 420, height: 300))
+    }
+
     @Test func aNewSizeIsPulledBackOnScreen() {
         // Only a sliver of the old frame was on screen (a smaller display now): the new, narrower
         // window would sit wholly past the left and bottom edges, so it is pulled inside.

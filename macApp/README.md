@@ -226,20 +226,25 @@ leaves no stale files behind.
 ⇧⌘P floats the current panel in a small always-on-top window with no frame or title bar. Drag it
 by the panel, resize it from its edges. Hovering fades in its controls as floating Liquid Glass
 pieces (frosted material before macOS 26): minimize on the left, previous/next panel, auto-advance,
-seconds per panel and window opacity in the middle (the last two hide when the window is narrow),
-and back to the full reader on the right.
+seconds per panel and opacity in the middle (the last two hide when the window is narrow), and back
+to the full reader on the right. With VoiceOver on the controls stay shown, and the panel reads as
+its place in the comic ("Page 1 of 3, panel 2 of 7"). The opacity slider fades the panel, not the
+controls, and is remembered app-wide.
 
 Dropped within about 48 pt of a corner of its screen, the peek snaps into that corner, 16 pt in from
-the edges, and stays in it as the panel's shape changes its height. It opens where it was last left
-on that screen (in the same corner, else at the same top-left); if that screen is gone or the spot is
-off it now, it opens centred. The size is not remembered: it always opens 420 pt wide.
+the edges, and stays in it as the panel's shape changes its height. Out of a corner it grows and
+shrinks from its top edge and is pulled back onto the screen if it would run off it; a shape taller
+than the screen (a webtoon page in Scroll) is shrunk to fit. It opens where it was last left on that
+screen (in the same corner, else at the same top-left); if that screen is gone or the spot is off it
+now, it opens centred. The size is not remembered: it always opens 420 pt wide (narrower for a shape
+taller than the screen).
 
 ## Peek auto-advance
 
 The peek window (⇧⌘P) can read by itself: the play button in its hover bar, or P while it is
 focused, steps one panel (a spread in Two pages, where the peek shows both pages, a page in Scroll)
-every few seconds. The stepper next to it sets the wait, 2 to 20 seconds (5 by default, remembered
-app-wide; its tooltip shows the current value). Any step, by hand or by the timer, starts the wait
+every few seconds. The stepper next to it, with the seconds shown beside it, sets the wait, 2 to 20
+seconds (5 by default, remembered app-wide). Any step, by hand or by the timer, starts the wait
 again, and the wait only starts once the page is on screen with its panels detected. It pauses while
 the pointer is over the peek or the reader's panel editor is open, and starts the wait again after.
 Playing stops by itself at the end of the comic, if the comic could not be opened, or when the peek
