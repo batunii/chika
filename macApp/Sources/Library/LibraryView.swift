@@ -61,10 +61,11 @@ struct LibraryView: View {
             switch result {
             case .success(let urls):
                 for url in urls { if pickMode == .inPlace { library.addInPlace(url) } else { library.importComic(from: url) } }
-            case .failure(let error): library.importError = error.localizedDescription
+            case .failure(let error): library.report(error.localizedDescription)
             }
         }
-        .alert("Import failed", isPresented: Binding(
+        // Not only imports: removals, an already-added folder and failed progress saves are said here too.
+        .alert("Library", isPresented: Binding(
             get: { library.importError != nil },
             set: { if !$0 { library.importError = nil } }
         )) {
@@ -72,12 +73,12 @@ struct LibraryView: View {
         } message: {
             Text(library.importError ?? "")
         }
-        .alert("Remove comic?", isPresented: Binding(
+        .alert(pendingDelete.map { "\(removalLabel($0))?" } ?? "", isPresented: Binding(
             get: { pendingDelete != nil },
             set: { if !$0 { pendingDelete = nil } }
         )) {
             Button("Cancel", role: .cancel) { pendingDelete = nil }
-            Button("Remove", role: .destructive) {
+            Button(pendingDelete.map(removalLabel) ?? "Remove", role: .destructive) {
                 if let url = pendingDelete { library.delete(url) }
                 pendingDelete = nil
             }
@@ -96,7 +97,7 @@ struct LibraryView: View {
             progress = ReadingProgress.all()
             opened = ReadingProgress.openedMap()
         }
-        .onOpenURL { url in library.add(url) }
+        .onOpenURL { url in library.open(fromFinder: url) { openWindow(id: "reader", value: $0) } }
         .handlesExternalEvents(preferring: ["*"], allowing: ["*"])   // see ChikaApp
     }
 
@@ -118,15 +119,19 @@ struct LibraryView: View {
     }
 
     private func removalLabel(_ url: URL) -> String {
-        guard let source = library.sources[url] else { return "Remove" }
-        return source == url ? "Remove from Library" : "Stop Watching “\(source.lastPathComponent)”"
+        if let source = library.sources[url] { return source == url ? "Remove from Library" : "Stop Watching “\(source.lastPathComponent)”" }
+        return library.isImportedCopy(url) ? "Delete Imported Copy" : "Remove"
     }
 
     private func removalMessage(_ url: URL) -> String {
-        guard let source = library.sources[url] else { return "This deletes the imported copy. The original file is untouched." }
-        return source == url
-            ? "The comic leaves the library. The file itself is untouched."
-            : "Every comic in “\(source.lastPathComponent)” leaves the library. The files themselves are untouched."
+        if let source = library.sources[url] {
+            return source == url
+                ? "The comic leaves the library. The file itself is untouched."
+                : "Every comic in “\(source.lastPathComponent)” leaves the library. The files themselves are untouched."
+        }
+        return library.isImportedCopy(url)
+            ? "Chika's copy of “\(url.comicTitle)” is deleted for good, with its reading progress, bookmarks and panel edits. The file you imported it from is untouched."
+            : "The comic leaves the library."
     }
 
     private var header: some View {
@@ -223,7 +228,8 @@ struct LibraryView: View {
                         // Not lazy: a lazy row sizes its height before every card is measured, clipping
                         // a card whose title wraps to two lines.
                         HStack(alignment: .top, spacing: 24) {
-                            ForEach(resume, id: \.self) { url in card(url).frame(width: 150) }
+                            // The 20 most recent: being eager, the row loads every card's cover at once.
+                            ForEach(resume.prefix(20), id: \.self) { url in card(url).frame(width: 150) }
                         }
                         .padding(.bottom, 8)   // room for the cards' hard shadow
                     }
@@ -264,12 +270,23 @@ struct LibraryView: View {
 
     private func card(_ url: URL) -> some View {
         Button { openWindow(id: "reader", value: url) } label: {
-            ComicCard(url: url, progress: library.keys[url].flatMap { progress[$0] }, info: library.info[url])
+            ComicCard(url: url, progress: library.keys[url].flatMap { progress[$0] }, info: library.info[url],
+                      revision: library.revisions[url])
         }
         .buttonStyle(.plain)
         .contextMenu {
-            Button(role: .destructive) { pendingDelete = url } label: {
-                Label(removalLabel(url), systemImage: "trash")
+            Button("Open") { openWindow(id: "reader", value: url) }
+            if let folder = library.sources[url], folder != url {
+                // Removing acts on the whole watched folder, not this comic: the menu says so.
+                Section("Watched folder “\(folder.lastPathComponent)”") {
+                    Button(role: .destructive) { pendingDelete = url } label: {
+                        Label("Stop Watching Folder", systemImage: "eye.slash")
+                    }
+                }
+            } else {
+                Button(role: .destructive) { pendingDelete = url } label: {
+                    Label(removalLabel(url), systemImage: library.isImportedCopy(url) ? "trash" : "minus.circle")
+                }
             }
         }
     }
@@ -282,10 +299,12 @@ struct ComicCard: View {
     let url: URL
     let progress: Progress?
     var info: ComicInfo?
+    /// The file's ReadingProgress revision: a comic still being copied in loads its cover again once complete.
+    var revision: String?
     @State private var cover: NSImage?
     @State private var pages = 0
 
-    private var title: String { url.deletingPathExtension().lastPathComponent.uppercased() }
+    private var title: String { url.comicTitle.uppercased() }
     private var lastPage: Int { progress?.page ?? 0 }
     private var pageCount: Int { progress?.total ?? pages }
     private var started: Bool { lastPage > 0 }
@@ -343,8 +362,9 @@ struct ComicCard: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.top, 2)
         }
-        .task {
+        .task(id: revision) {
             let loaded = await CoverLoader.load(for: url)
+            guard !Task.isCancelled else { return }   // scrolled away, or replaced by a newer revision's load
             cover = loaded.cover
             pages = loaded.pageCount
         }

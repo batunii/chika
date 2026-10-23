@@ -1,5 +1,6 @@
 import Foundation
 import SQLite3
+import os
 import ChikaCore
 
 /// Per-comic reading progress (resume point + total): the counterpart to Android's Room-backed
@@ -25,14 +26,20 @@ struct Bookmark: Hashable {
 /// inode), so a comic keeps its place when it is renamed or moved on its volume. Not
 /// `fileResourceIdentifierKey`: Apple documents that one as not persistent across restarts.
 enum ReadingProgress {
-    /// Posted after every write so the library re-sorts and refreshes its cards.
+    /// Posted after writes (at most twice a second) so the library re-sorts and refreshes its cards.
     static let didChange = Notification.Name("chika.readingProgressDidChange")
+    /// Posted once per database when saving progress fails, with the reason as the object, so the library can say so.
+    static let saveDidFail = Notification.Name("chika.readingProgressSaveDidFail")
     // `var` so tests can point these at their own store instead of the real app data.
     static var databaseURL = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         .appendingPathComponent("Chika/progress.sqlite")
     static var defaults = UserDefaults.standard
 
     private static var connection: (url: URL, db: OpaquePointer)?
+    private static let log = Logger(subsystem: "com.chakra.comicreader", category: "progress")
+    private static var lastError = "the progress database could not be opened"
+    private static var reportedFailure: URL?
+    private static var changePending = false
     private static let transient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
 
     /// The table key for a comic. Falls back to the path when the volume has no stable inode/UUID.
@@ -70,22 +77,18 @@ enum ReadingProgress {
     static func readingDirection(_ url: URL, default fallback: Bool) -> Bool { get(url)?.rtl ?? fallback }
 
     static func set(_ url: URL, page: Int, step: Int, total: Int, rtl: Bool, mode: String) {
-        run("""
+        saved(run("""
             INSERT INTO progress(id, page, step, total, rtl, mode) VALUES(?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET page = excluded.page, step = excluded.step, total = excluded.total,
                 rtl = excluded.rtl, mode = excluded.mode
-            """, [key(url), page, step, total, rtl, mode])
-        changed()
+            """, [key(url), page, step, total, rtl, mode]))
     }
 
-    /// Call before the file is gone: the key comes from the file itself.
-    static func clear(_ url: URL) {
-        run("DELETE FROM progress WHERE id = ?", [key(url)])
-        run("DELETE FROM bookmarks WHERE id = ?", [key(url)])
-        run("DELETE FROM panel_overrides WHERE id = ?", [key(url)])
-        run("DELETE FROM detections WHERE id = ?", [key(url)])
-        run("DELETE FROM balloon_text WHERE id = ?", [key(url)])
-        run("DELETE FROM translations WHERE id = ?", [key(url)])
+    /// Everything stored for the comic whose `key(_:)` is `key`: take the key while the file is still there.
+    static func clear(key: String) {
+        for table in ["progress", "bookmarks", "panel_overrides", "detections", "balloon_text", "translations"] {
+            run("DELETE FROM \(table) WHERE id = ?", [key])
+        }
         changed()
     }
 
@@ -93,11 +96,10 @@ enum ReadingProgress {
 
     /// Records that a comic was just opened/imported, so the library can order by recency.
     static func markOpened(_ url: URL) {
-        run("""
+        saved(run("""
             INSERT INTO progress(id, opened) VALUES(?, ?)
             ON CONFLICT(id) DO UPDATE SET opened = excluded.opened
-            """, [key(url), Date().timeIntervalSince1970])
-        changed()
+            """, [key(url), Date().timeIntervalSince1970]))
     }
 
     /// Last-opened timestamps keyed by `key(_:)` (missing = never opened), the library sort key.
@@ -178,11 +180,12 @@ enum ReadingProgress {
 
     /// A page's stored zoom regions for one reading direction and its speech balloons; nil when it
     /// was never detected or was detected by another detector `version` or from another `revision(_:)`.
-    static func detection(_ url: URL, page: Int, rtl: Bool,
+    /// `revision` is the caller's `revision(_:)` of the file, taken once rather than on every page.
+    static func detection(_ url: URL, page: Int, rtl: Bool, revision: String?,
                           version: Int = CoreMLPanelDetector.version) -> (regions: [Panel], bubbles: [Panel])? {
         var found: (regions: [Panel], bubbles: [Panel])?
         run("SELECT regions, bubbles FROM detections WHERE id = ? AND page = ? AND rtl = ? AND version = ? AND rev = ?",
-            [key(url), page, rtl, version, revision(url)]) { row in
+            [key(url), page, rtl, version, revision]) { row in
             let decode = { (col: Int32) in
                 sqlite3_column_text(row, col).flatMap { try? JSONDecoder().decode([Panel].self, from: Data(String(cString: $0).utf8)) }
             }
@@ -208,10 +211,10 @@ enum ReadingProgress {
     }
 
     /// The pages stored in both reading directions by this detector `version` from the file as it is now.
-    static func detectedPages(_ url: URL, version: Int = CoreMLPanelDetector.version) -> Set<Int> {
+    static func detectedPages(_ url: URL, revision: String?, version: Int = CoreMLPanelDetector.version) -> Set<Int> {
         var pages: Set<Int> = []
         run("SELECT page FROM detections WHERE id = ? AND version = ? AND rev = ? GROUP BY page HAVING COUNT(*) = 2",
-            [key(url), version, revision(url)]) { row in
+            [key(url), version, revision]) { row in
             pages.insert(Int(sqlite3_column_int64(row, 0)))
         }
         return pages
@@ -221,10 +224,10 @@ enum ReadingProgress {
 
     /// A page's recognized balloon texts keyed by balloon box, read by text recognizer `version`.
     /// Keyed by the box, not its index, so rows from an older detector's balloons simply never match.
-    static func balloonTexts(_ url: URL, page: Int, version: Int = BalloonReader.version) -> [Panel: String] {
+    static func balloonTexts(_ url: URL, page: Int, revision: String?, version: Int = BalloonReader.version) -> [Panel: String] {
         var texts: [Panel: String] = [:]
         run("SELECT box, text FROM balloon_text WHERE id = ? AND page = ? AND version = ? AND rev = ?",
-            [key(url), page, version, revision(url)]) { row in
+            [key(url), page, version, revision]) { row in
             guard let box = sqlite3_column_text(row, 0).flatMap({ try? JSONDecoder().decode(Panel.self, from: Data(String(cString: $0).utf8)) })
             else { return }
             texts[box] = String(cString: sqlite3_column_text(row, 1))
@@ -288,9 +291,13 @@ enum ReadingProgress {
         if let old = connection { sqlite3_close(old.db); connection = nil }
         try? FileManager.default.createDirectory(at: databaseURL.deletingLastPathComponent(), withIntermediateDirectories: true)
         var handle: OpaquePointer?
-        guard sqlite3_open(databaseURL.path, &handle) == SQLITE_OK, let handle else { sqlite3_close(handle); return nil }
+        guard sqlite3_open(databaseURL.path, &handle) == SQLITE_OK, let handle else {
+            failed(handle.map { String(cString: sqlite3_errmsg($0)) } ?? "out of memory", "opening \(databaseURL.path)")
+            sqlite3_close(handle)
+            return nil
+        }
         // page/step/total are NULL for a comic that was opened but never read; rtl NULL = never chosen.
-        sqlite3_exec(handle, """
+        let schema = sqlite3_exec(handle, """
             PRAGMA journal_mode = WAL;
             CREATE TABLE IF NOT EXISTS progress(id TEXT PRIMARY KEY, page INTEGER, step INTEGER, total INTEGER, rtl INTEGER, opened REAL);
             CREATE TABLE IF NOT EXISTS bookmarks(id TEXT, page INTEGER, step INTEGER, PRIMARY KEY(id, page, step));
@@ -301,6 +308,7 @@ enum ReadingProgress {
                 PRIMARY KEY(id, page, box));
             CREATE TABLE IF NOT EXISTS translations(id TEXT, source TEXT, target TEXT, text TEXT NOT NULL, PRIMARY KEY(id, source, target));
             """, nil, nil, nil)
+        if schema != SQLITE_OK { failed(String(cString: sqlite3_errmsg(handle)), "creating the tables") }
         // Added in phase 3; each fails harmlessly once the column exists. drawn NULL (an edit saved before it) = not drawn.
         sqlite3_exec(handle, "ALTER TABLE progress ADD COLUMN mode TEXT", nil, nil, nil)
         sqlite3_exec(handle, "ALTER TABLE panel_overrides ADD COLUMN drawn INTEGER", nil, nil, nil)
@@ -315,7 +323,11 @@ enum ReadingProgress {
     @discardableResult
     private static func run(_ sql: String, _ args: [Any?] = [], row: ((OpaquePointer) -> Void)? = nil) -> Bool {
         var stmt: OpaquePointer?
-        guard let db, sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK, let stmt else { return false }
+        guard let db else { return false }   // opening it already logged why
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK, let stmt else {
+            failed(String(cString: sqlite3_errmsg(db)), sql)
+            return false
+        }
         defer { sqlite3_finalize(stmt) }
         for (i, arg) in args.enumerated() {
             let n = Int32(i + 1)
@@ -329,9 +341,27 @@ enum ReadingProgress {
         }
         while true {
             let result = sqlite3_step(stmt)
-            guard result == SQLITE_ROW else { return result == SQLITE_DONE }
+            guard result == SQLITE_ROW else {
+                if result != SQLITE_DONE { failed(String(cString: sqlite3_errmsg(db)), sql) }
+                return result == SQLITE_DONE
+            }
             row?(stmt)
         }
+    }
+
+    /// Logs a failed statement; its message is what a failed save reports.
+    private static func failed(_ message: String, _ doing: String) {
+        lastError = message
+        log.error("SQLite failed (\(message, privacy: .public)) while \(doing, privacy: .public)")
+    }
+
+    /// A progress write landed (the library refreshes) or failed. A failure is said once per database:
+    /// a full disk or a denied write would otherwise lose a whole session of reading without a word.
+    private static func saved(_ ok: Bool) {
+        guard !ok else { changed(); return }
+        guard reportedFailure != databaseURL else { return }
+        reportedFailure = databaseURL
+        NotificationCenter.default.post(name: saveDidFail, object: lastError)
     }
 
     private static func progress(_ row: OpaquePointer, from col: Int32) -> Progress? {
@@ -343,5 +373,13 @@ enum ReadingProgress {
                         mode: sqlite3_column_text(row, col + 4).map { String(cString: $0) })
     }
 
-    private static func changed() { NotificationCenter.default.post(name: didChange, object: nil) }
+    // Coalesced: a reader writes on every step, and each post makes the library re-read the whole table.
+    private static func changed() {
+        guard !changePending else { return }
+        changePending = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            changePending = false
+            NotificationCenter.default.post(name: didChange, object: nil)
+        }
+    }
 }

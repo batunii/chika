@@ -562,7 +562,7 @@ private struct ReaderContent: View {
                         openWindow(id: "reader", value: next)
                         dismiss()
                     } label: {
-                        Label("NEXT ISSUE: \(next.deletingPathExtension().lastPathComponent.uppercased())", systemImage: "arrow.right")
+                        Label("NEXT ISSUE: \(next.comicTitle.uppercased())", systemImage: "arrow.right")
                             .font(.anton(12)).tracking(1).foregroundColor(Chika.cream)
                             .padding(.horizontal, 12).padding(.vertical, 6)
                             .background(Chika.crimson).clipShape(Capsule())

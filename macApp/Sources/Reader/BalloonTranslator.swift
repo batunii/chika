@@ -100,7 +100,7 @@ final class BalloonTranslator: ObservableObject {
             await previous?.value   // one page's recognition at a time, however fast the pages turn
             for (page, image) in pages {
                 if Task.isCancelled { return }
-                var boxes = ReadingProgress.detection(url, page: page, rtl: rtl)?.bubbles
+                var boxes = ReadingProgress.detection(url, page: page, rtl: rtl, revision: revision)?.bubbles
                 if boxes == nil {
                     // Two pages mode never detects, and an edited page may never have been.
                     let found = await offMain { ReaderModel.detector.detect(image) }
@@ -108,7 +108,7 @@ final class BalloonTranslator: ObservableObject {
                     if let found { ReadingProgress.setDetection(url, page: page, found, revision: revision) }
                     boxes = found?.bubbles
                 }
-                let known = ReadingProgress.balloonTexts(url, page: page)
+                let known = ReadingProgress.balloonTexts(url, page: page, revision: revision)
                 for box in boxes ?? [] {
                     let stored = known[box]
                     let (text, paper) = await offMain {

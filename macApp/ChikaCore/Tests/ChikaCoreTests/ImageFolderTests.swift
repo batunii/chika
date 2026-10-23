@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 import ChikaCore
 
@@ -12,5 +13,14 @@ struct ImageFolderTests {
         #expect(!ImageFolder.isComic(["01.jpg", "One.cbz"]))          // an archive
         #expect(!ImageFolder.isComic([".DS_Store"]))
         #expect(!ImageFolder.isComic([]))
+    }
+}
+
+struct ComicTitleTests {
+    @Test func aFolderKeepsItsDotsAndAFileLosesItsExtension() {
+        #expect(URL(fileURLWithPath: "/c/Vol.01", isDirectory: true).comicTitle == "Vol.01")
+        #expect(URL(fileURLWithPath: "/c/Dr. Slump", isDirectory: true).comicTitle == "Dr. Slump")
+        #expect(URL(fileURLWithPath: "/c/Saga.cbz").comicTitle == "Saga")
+        #expect(URL(fileURLWithPath: "/c/Chapter 10.5.cbz").comicTitle == "Chapter 10.5")
     }
 }

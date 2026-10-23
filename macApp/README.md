@@ -244,28 +244,43 @@ Chika offers four actions to Shortcuts, Spotlight and Siri (so also to Raycast o
 a shortcut): **Next Panel** and **Previous Panel** step the reader window last in front, as the arrow
 keys do (a spread in Two pages, a page in Scroll), without bringing Chika forward; **Toggle Peek** opens
 or closes that reader's peek window; **Open Last Comic** brings Chika forward and opens the comic opened
-most recently (an import counts), where it was left. With no reader open, the first three fail with "No
+most recently (an import, or a comic newly added in place, counts), where it was left. With no reader open, the first three fail with "No
 comic is open in Chika."
 
 ## Continue reading
 
 Above the library grid, a row holds the comics started (a panel or page read) but not read to the last
-page, most recently opened first; click one to carry on. The row hides when there are none and while
-the search field has text.
+page, most recently opened first (the 20 most recent); click one to carry on. The row hides when there
+are none and while the search field has text.
 
 ## Where the library lives
 
 - **Imported copies** (⌘O, or files dropped on the window) go to the Comics folder above. CBZ,
   CBR, CB7 and PDF are accepted: CBR and CB7 are converted to CBZ on import, PDFs are kept as they are.
+  A comic opened with Chika from Finder (Open With, or a double-click) opens in a reader: one the
+  library already reads in place opens as it is, any other file is imported first. Removing an
+  imported copy (Delete Imported Copy in its card's menu) deletes it for good, with its progress,
+  bookmarks and panel edits; if the file can't be deleted, all of that is kept. Several failed imports
+  are listed together in one alert.
 - **Read in place** (⇧⌘O, or a folder dropped on the window or opened with Chika): single comics or whole folders stay
   where they are. Chika keeps a security-scoped bookmark for each (entitlement
   `com.apple.security.files.bookmarks.app-scope`) and watches folders with FSEvents, so new CBZ/CBR
   files appear by themselves
-  (PDFs are not picked up from folders; add them one by one). Removing one only forgets the bookmark; the files are never touched.
-  A CBR or CB7 read in place is converted once into `Library/Caches/Chika/Converted` inside the container.
+  (PDFs are not picked up from folders; add them one by one). Removing one only forgets the bookmark
+  (for a comic inside a watched folder, its card's menu offers Stop Watching for the whole folder); the
+  files are never touched. A folder already in the library is not added twice. Comics new to the
+  library this way (added, or appearing in a watched folder) sort first under Recent, like an import.
+  A watched folder renamed or moved while Chika runs is followed through its bookmark. Changes in
+  watched folders are rescanned off the main thread, half a second after they settle; a comic still
+  being copied in gets its cover, page count and series once the copy completes.
+  A CBR or CB7 read in place is converted once into `Library/Caches/Chika/Converted` inside the
+  container when it is first read; its card's cover and its ComicInfo.xml are read straight from the
+  archive without converting it.
 - **A folder of images** is one comic, its pages the folder's own image files (jpg, png, webp, gif,
   bmp, avif) in natural order (p2 before p10); subfolders and other files are not read. Imported (⌘O),
-  those images are copied in as one CBZ named after the folder. Read in place (⇧⌘O, or dropped), a
+  those images are copied in as one CBZ named after the folder; a folder with no images of its own
+  imports every comic under it instead (archives, and subfolders of images), each as its own copy. Its
+  title is the folder's whole name, dots and all ("Vol.01"). Read in place (⇧⌘O, or dropped), a
   folder holding nothing but images (hidden files aside) is one comic rather than a folder to watch,
   and inside a watched folder each subfolder holding nothing but images shows as one comic too. A
   folder mixing images with anything else (a text file, an archive, a subfolder) is not a comic; its
@@ -274,7 +289,9 @@ the search field has text.
   with images becomes a comic, and a folder of images that gains an archive becomes a folder of comics.
 - **Progress** is a SQLite table at `Library/Application Support/Chika/progress.sqlite` inside the
   container, keyed by file identity (volume UUID + inode), so renaming a comic keeps its place. The
-  first launch copies the old UserDefaults progress over and leaves it for the Catalyst app.
+  first launch copies the old UserDefaults progress over and leaves it for the Catalyst app. A failed
+  database write is logged (subsystem `com.chakra.comicreader`, category `progress`), and a progress
+  save that fails is said once in the library window.
 
 ## Finder thumbnails (Quick Look)
 

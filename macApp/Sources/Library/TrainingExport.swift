@@ -54,7 +54,7 @@ enum TrainingExport {
         try FileManager.default.createDirectory(at: images, withIntermediateDirectories: true)
         try FileManager.default.createDirectory(at: labels, withIntermediateDirectories: true)
         func safeTitle(_ url: URL) -> String {
-            var safe = String(url.deletingPathExtension().lastPathComponent.map { $0.isLetter || $0.isNumber || $0 == "-" ? $0 : "_" })
+            var safe = String(url.comicTitle.map { $0.isLetter || $0.isNumber || $0 == "-" ? $0 : "_" })
             // A title that fits the 255-byte name limit may not once chika_, <id>, _p<page> and .jpg are added.
             while safe.utf8.count > 200 { safe.removeLast() }
             return safe

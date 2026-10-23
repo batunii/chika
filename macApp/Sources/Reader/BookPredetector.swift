@@ -44,8 +44,8 @@ final class BookPredetector {
     private func startNext() {
         guard running == nil, !waiting.isEmpty else { return }
         let url = waiting.removeFirst()
-        let done = ReadingProgress.detectedPages(url)
         let revision = ReadingProgress.revision(url)   // before the open, so an edit during the pass drops its results
+        let done = ReadingProgress.detectedPages(url, revision: revision)
         // Tests swap the database between cases: a job only ever writes to the store it started in.
         let store = ReadingProgress.databaseURL
         let task = Task.detached(priority: .utility) {

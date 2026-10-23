@@ -46,10 +46,45 @@ final class LibraryStoreTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: fake) }
 
         await store.importComic(from: fake).value
+        await store.importComic(from: fake).value
 
-        XCTAssertNotNil(store.importError)
+        XCTAssertEqual(store.importError?.components(separatedBy: "\n").count, 2)   // both failures are said, not just the last
         XCTAssertEqual(try files(), [])
         XCTAssertTrue(store.comics.isEmpty)
+    }
+
+    func testImportingAFolderWithNoPagesOfItsOwnImportsEachComicInIt() async throws {
+        let root = dir.appendingPathExtension("series"), empty = dir.appendingPathExtension("empty")
+        defer { for folder in [root, empty] { try? FileManager.default.removeItem(at: folder) } }
+        _ = try makeImageFolder(root.appendingPathComponent("Chapter 2"))
+        try FileManager.default.copyItem(at: comic, to: root.appendingPathComponent("One.cbz"))
+        try FileManager.default.createDirectory(at: empty, withIntermediateDirectories: true)
+        let store = LibraryStore(directory: dir, defaults: ReadingProgress.defaults)
+
+        await store.importComic(from: root).value
+        XCTAssertNil(store.importError)
+        XCTAssertEqual(try files(), ["Chapter 2.cbz", "One.cbz"])
+
+        await store.importComic(from: empty).value
+        XCTAssertEqual(store.importError, "Couldn't import \(empty.lastPathComponent): No comics or images found in this folder.")
+    }
+
+    func testOpenWithReadsAComicTheLibraryHasAndImportsAnyOtherFirst() async throws {
+        let folder = dir.appendingPathExtension("watched")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        try FileManager.default.copyItem(at: comic, to: folder.appendingPathComponent("One.cbz"))
+        let store = LibraryStore(directory: dir, defaults: ReadingProgress.defaults)
+        store.addInPlace(folder)
+        var read: [URL] = []
+
+        XCTAssertNil(store.open(fromFinder: folder.appendingPathComponent("One.cbz")) { read.append($0) })
+        XCTAssertEqual(read, store.comics)   // the comic read in place, not a new copy
+        XCTAssertEqual(try files(), [])
+
+        await store.open(fromFinder: comic) { read.append($0) }?.value
+        XCTAssertEqual(try files(), ["SyntheticManga.cbz"])
+        XCTAssertEqual(read.last, dir.appendingPathComponent("SyntheticManga.cbz"))
     }
 
     func testReadersOpenAtQuitReopenOnceIfTheirComicIsStillThere() async throws {
@@ -157,7 +192,7 @@ final class LibraryStoreTests: XCTestCase {
         ReadingProgress.toggleBookmark(a, page: 1, step: 2)   // the same spot again removes it
         XCTAssertEqual(ReadingProgress.bookmarks(a), [Bookmark(page: 1, step: -1), Bookmark(page: 4, step: -1)])
 
-        ReadingProgress.clear(a)
+        ReadingProgress.clear(key: ReadingProgress.key(a))
         XCTAssertEqual(ReadingProgress.bookmarks(a), [])
         XCTAssertEqual(ReadingProgress.bookmarks(b), [Bookmark(page: 0, step: 0)])
     }
@@ -172,25 +207,25 @@ final class LibraryStoreTests: XCTestCase {
         let found = PageDetection(leftToRight: [left, right], rightToLeft: [right, left], bubbles: [bubble])
 
         ReadingProgress.setDetection(a, page: 2, found, revision: ReadingProgress.revision(a), version: 1)
-        XCTAssertEqual(ReadingProgress.detection(a, page: 2, rtl: false, version: 1)?.regions, [left, right])
-        XCTAssertEqual(ReadingProgress.detection(a, page: 2, rtl: true, version: 1)?.regions, [right, left])
-        XCTAssertEqual(ReadingProgress.detection(a, page: 2, rtl: true, version: 1)?.bubbles, [bubble])
-        XCTAssertEqual(ReadingProgress.detectedPages(a, version: 1), [2])
-        XCTAssertNil(ReadingProgress.detection(a, page: 1, rtl: false, version: 1))
-        XCTAssertNil(ReadingProgress.detection(b, page: 2, rtl: false, version: 1))
+        XCTAssertEqual(ReadingProgress.detection(a, page: 2, rtl: false, revision: ReadingProgress.revision(a), version: 1)?.regions, [left, right])
+        XCTAssertEqual(ReadingProgress.detection(a, page: 2, rtl: true, revision: ReadingProgress.revision(a), version: 1)?.regions, [right, left])
+        XCTAssertEqual(ReadingProgress.detection(a, page: 2, rtl: true, revision: ReadingProgress.revision(a), version: 1)?.bubbles, [bubble])
+        XCTAssertEqual(ReadingProgress.detectedPages(a, revision: ReadingProgress.revision(a), version: 1), [2])
+        XCTAssertNil(ReadingProgress.detection(a, page: 1, rtl: false, revision: ReadingProgress.revision(a), version: 1))
+        XCTAssertNil(ReadingProgress.detection(b, page: 2, rtl: false, revision: ReadingProgress.revision(b), version: 1))
 
         // A new detector version ignores the old rows, then replaces them.
-        XCTAssertNil(ReadingProgress.detection(a, page: 2, rtl: false, version: 2))
-        XCTAssertEqual(ReadingProgress.detectedPages(a, version: 2), [])
+        XCTAssertNil(ReadingProgress.detection(a, page: 2, rtl: false, revision: ReadingProgress.revision(a), version: 2))
+        XCTAssertEqual(ReadingProgress.detectedPages(a, revision: ReadingProgress.revision(a), version: 2), [])
         ReadingProgress.setDetection(a, page: 2, PageDetection(leftToRight: [right], rightToLeft: [left], bubbles: []),
                                      revision: ReadingProgress.revision(a), version: 2)
-        XCTAssertEqual(ReadingProgress.detection(a, page: 2, rtl: false, version: 2)?.regions, [right])
-        XCTAssertNil(ReadingProgress.detection(a, page: 2, rtl: false, version: 1))
+        XCTAssertEqual(ReadingProgress.detection(a, page: 2, rtl: false, revision: ReadingProgress.revision(a), version: 2)?.regions, [right])
+        XCTAssertNil(ReadingProgress.detection(a, page: 2, rtl: false, revision: ReadingProgress.revision(a), version: 1))
 
         ReadingProgress.setDetection(b, page: 0, found, revision: ReadingProgress.revision(b), version: 2)
-        ReadingProgress.clear(a)
-        XCTAssertEqual(ReadingProgress.detectedPages(a, version: 2), [])
-        XCTAssertEqual(ReadingProgress.detectedPages(b, version: 2), [0])
+        ReadingProgress.clear(key: ReadingProgress.key(a))
+        XCTAssertEqual(ReadingProgress.detectedPages(a, revision: ReadingProgress.revision(a), version: 2), [])
+        XCTAssertEqual(ReadingProgress.detectedPages(b, revision: ReadingProgress.revision(b), version: 2), [0])
     }
 
     func testAComicEditedInPlaceForgetsItsDetectionsButKeepsTheReadersOwnData() throws {
@@ -204,7 +239,7 @@ final class LibraryStoreTests: XCTestCase {
         ReadingProgress.set(a, page: 3, step: 1, total: 8, rtl: false, mode: "panels")
         ReadingProgress.toggleBookmark(a, page: 2, step: -1)
         ReadingProgress.setPanelOverride(a, page: 1, panels: [.fullPage])
-        XCTAssertEqual(ReadingProgress.detectedPages(a), [0])
+        XCTAssertEqual(ReadingProgress.detectedPages(a, revision: ReadingProgress.revision(a)), [0])
 
         // A page appended in place: same inode, so same key, but another size and date.
         let handle = try FileHandle(forWritingTo: a)
@@ -213,14 +248,114 @@ final class LibraryStoreTests: XCTestCase {
         try handle.close()
         try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSinceNow: 5)], ofItemAtPath: a.path)
         XCTAssertNotEqual(ReadingProgress.revision(a), old)
-        XCTAssertNil(ReadingProgress.detection(a, page: 0, rtl: false))
-        XCTAssertEqual(ReadingProgress.detectedPages(a), [])
-        XCTAssertEqual(ReadingProgress.balloonTexts(a, page: 0), [:])
+        XCTAssertNil(ReadingProgress.detection(a, page: 0, rtl: false, revision: ReadingProgress.revision(a)))
+        XCTAssertEqual(ReadingProgress.detectedPages(a, revision: ReadingProgress.revision(a)), [])
+        XCTAssertEqual(ReadingProgress.balloonTexts(a, page: 0, revision: ReadingProgress.revision(a)), [:])
         ReadingProgress.setDetection(a, page: 0, found, revision: old)   // read before the edit: dropped
-        XCTAssertEqual(ReadingProgress.detectedPages(a), [])
+        XCTAssertEqual(ReadingProgress.detectedPages(a, revision: ReadingProgress.revision(a)), [])
         XCTAssertEqual(ReadingProgress.get(a)?.page, 3)
         XCTAssertEqual(ReadingProgress.bookmarks(a), [Bookmark(page: 2, step: -1)])
         XCTAssertEqual(ReadingProgress.panelOverride(a, page: 1), [.fullPage])
+    }
+
+    func testRemovingNeverDeletesAFileOutsideTheLibraryFolder() throws {
+        let store = LibraryStore(directory: dir, defaults: ReadingProgress.defaults)
+        // Say a comic whose watched folder dropped it while the Remove alert was open.
+        let outside = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).cbz")
+        try FileManager.default.copyItem(at: comic, to: outside)
+        defer { try? FileManager.default.removeItem(at: outside) }
+        ReadingProgress.set(outside, page: 2, step: -1, total: 8, rtl: false, mode: "panels")
+
+        store.delete(outside)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: outside.path))
+        XCTAssertEqual(ReadingProgress.get(outside)?.page, 2)
+    }
+
+    func testAnImportedCopyKeepsItsDataUntilItIsReallyDeleted() async throws {
+        let store = LibraryStore(directory: dir, defaults: ReadingProgress.defaults)
+        await store.importComic(from: comic).value
+        let copy = try XCTUnwrap(store.comics.first)
+        let key = ReadingProgress.key(copy)
+        ReadingProgress.set(copy, page: 2, step: -1, total: 8, rtl: false, mode: "panels")
+        ReadingProgress.toggleBookmark(copy, page: 1, step: -1)
+
+        try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: dir.path)   // the folder refuses the delete
+        store.delete(copy)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: dir.path)
+        XCTAssertNotNil(store.importError)
+        XCTAssertEqual(store.comics, [copy])
+        XCTAssertEqual(ReadingProgress.get(copy)?.page, 2)
+        XCTAssertEqual(ReadingProgress.bookmarks(copy), [Bookmark(page: 1, step: -1)])
+
+        store.delete(copy)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: copy.path))
+        XCTAssertNil(ReadingProgress.all()[key])
+    }
+
+    func testARemovedComicsMetadataDoesNotStickToTheNextImportOfItsName() async throws {
+        let staging = dir.appendingPathExtension("staging")
+        defer { try? FileManager.default.removeItem(at: staging) }
+        func chapter(of series: String) throws -> URL {
+            let url = staging.appendingPathComponent(series).appendingPathComponent("Chapter 001.cbz")
+            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try FileManager.default.copyItem(at: comic, to: url)
+            try addComicInfo(to: url, "<ComicInfo><Series>\(series)</Series></ComicInfo>")
+            return url
+        }
+        let store = LibraryStore(directory: dir, defaults: ReadingProgress.defaults)
+        await store.importComic(from: try chapter(of: "X")).value
+        await store.infoTask?.value
+        let copy = try XCTUnwrap(store.comics.first)
+        XCTAssertEqual(store.info[copy]?.series, "X")
+
+        store.delete(copy)
+        await store.importComic(from: try chapter(of: "Y")).value
+        await store.infoTask?.value
+        XCTAssertEqual(store.comics, [copy])   // the same name, so the same URL
+        XCTAssertEqual(store.info[copy]?.series, "Y")
+    }
+
+    func testAComicStillBeingCopiedInIsReadAgainOnceComplete() async throws {
+        let source = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).cbz")
+        defer { try? FileManager.default.removeItem(at: source) }
+        try FileManager.default.copyItem(at: comic, to: source)
+        try addComicInfo(to: source, "<ComicInfo><Series>Saga</Series></ComicInfo>")
+        let bytes = try Data(contentsOf: source)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let url = dir.appendingPathComponent("Saga.cbz")
+        try bytes.prefix(bytes.count / 2).write(to: url)   // half copied: no ZIP directory yet
+
+        let store = LibraryStore(directory: dir, defaults: ReadingProgress.defaults)
+        await store.infoTask?.value
+        XCTAssertNil(store.info[url])
+        let half = store.revisions[url]
+
+        try bytes.write(to: url)
+        store.refresh()   // what the copy's last FSEvents change does
+        await store.infoTask?.value
+        XCTAssertEqual(store.info[url]?.series, "Saga")
+        XCTAssertNotEqual(store.revisions[url], half)   // so its card loads the cover again
+    }
+
+    func testAFailedProgressSaveIsReportedOnce() throws {
+        let store = LibraryStore(directory: dir, defaults: ReadingProgress.defaults)
+        let a = dir.appendingPathComponent("A.cbz")
+        try FileManager.default.copyItem(at: comic, to: a)
+        ReadingProgress.set(a, page: 1, step: -1, total: 8, rtl: false, mode: "panels")
+        XCTAssertNil(store.importError)
+
+        // Reopen the database read-only, as a full disk or a denied write would leave it.
+        let database = ReadingProgress.databaseURL, other = dir.appendingPathExtension("other.sqlite")
+        defer { for suffix in ["", "-wal", "-shm"] { try? FileManager.default.removeItem(atPath: other.path + suffix) } }
+        ReadingProgress.databaseURL = other
+        _ = ReadingProgress.all()   // closes the first database
+        try FileManager.default.setAttributes([.posixPermissions: 0o444], ofItemAtPath: database.path)
+        ReadingProgress.databaseURL = database
+
+        ReadingProgress.set(a, page: 2, step: -1, total: 8, rtl: false, mode: "panels")
+        ReadingProgress.markOpened(a)
+        XCTAssertEqual(store.importError?.components(separatedBy: "\n").count, 1)
+        XCTAssertTrue(store.importError?.contains("reading progress") == true, store.importError ?? "")
     }
 
     func testReaderWorkLandingAfterADeleteLeavesNoRows() throws {
@@ -262,6 +397,64 @@ final class LibraryStoreTests: XCTestCase {
         XCTAssertTrue(found.isDisjoint(with: queued))
     }
 
+    func testAStaleBookmarkKeepsTheBookmarksSavedAfterIt() throws {
+        let a = dir.appendingPathExtension("a"), b = dir.appendingPathExtension("b"), renamed = dir.appendingPathExtension("renamed")
+        defer { for folder in [a, b, renamed] { try? FileManager.default.removeItem(at: folder) } }
+        for folder in [a, b] {
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            try FileManager.default.copyItem(at: comic, to: folder.appendingPathComponent("One.cbz"))
+        }
+        let store = LibraryStore(directory: dir, defaults: ReadingProgress.defaults)
+        store.addInPlace(a)
+        store.addInPlace(b)
+        let saved = try XCTUnwrap(ReadingProgress.defaults.array(forKey: "chika.bookmarks.v1") as? [Data])
+        try FileManager.default.moveItem(at: a, to: renamed)   // a's bookmark is stale from now on
+
+        _ = LibraryStore(directory: dir, defaults: ReadingProgress.defaults)
+        let resaved = try XCTUnwrap(ReadingProgress.defaults.array(forKey: "chika.bookmarks.v1") as? [Data])
+        XCTAssertEqual(resaved.count, 2)
+        XCTAssertNotEqual(resaved[0], saved[0])   // a's was refreshed
+        let relaunched = LibraryStore(directory: dir, defaults: ReadingProgress.defaults)
+        XCTAssertEqual(Set(relaunched.comics.map { $0.deletingLastPathComponent().lastPathComponent }),
+                       [renamed.lastPathComponent, b.lastPathComponent])
+    }
+
+    func testAWatchedFolderRenamedWhileChikaRunsKeepsItsComics() throws {
+        let folder = dir.appendingPathExtension("watched"), renamed = dir.appendingPathExtension("renamed")
+        defer { for url in [folder, renamed] { try? FileManager.default.removeItem(at: url) } }
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        try FileManager.default.copyItem(at: comic, to: folder.appendingPathComponent("One.cbz"))
+        let store = LibraryStore(directory: dir, defaults: ReadingProgress.defaults)
+        store.addInPlace(folder)
+
+        try FileManager.default.moveItem(at: folder, to: renamed)
+        store.refresh()
+        XCTAssertEqual(store.comics.map { $0.deletingLastPathComponent().lastPathComponent }, [renamed.lastPathComponent])
+        let relaunched = LibraryStore(directory: dir, defaults: ReadingProgress.defaults)   // the new place was saved
+        XCTAssertEqual(relaunched.comics.map { $0.deletingLastPathComponent().lastPathComponent }, [renamed.lastPathComponent])
+    }
+
+    func testComicsAddedInPlaceSortFirstUnderRecent() async throws {
+        let folder = dir.appendingPathExtension("watched")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        try FileManager.default.copyItem(at: comic, to: folder.appendingPathComponent("One.cbz"))
+        let store = LibraryStore(directory: dir, defaults: ReadingProgress.defaults)
+        await store.importComic(from: comic).value
+        func newest() -> String? {
+            LibraryStore.arrange(store.comics, query: "", sort: .recent, unreadOnly: false, keys: store.keys, progress: [:],
+                                 opened: ReadingProgress.openedMap(), info: [:]).first?.comics.first?.lastPathComponent
+        }
+        XCTAssertEqual(newest(), "SyntheticManga.cbz")
+
+        store.addInPlace(folder)
+        XCTAssertEqual(newest(), "One.cbz")
+
+        try FileManager.default.copyItem(at: comic, to: folder.appendingPathComponent("Two.cbz"))
+        await store.refreshSoon().value   // FSEvents' rescan, off the main thread
+        XCTAssertEqual(newest(), "Two.cbz")
+    }
+
     func testWatchedFolderIsReadInPlaceAndNeverDeleted() throws {
         let folder = dir.appendingPathExtension("watched")
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
@@ -274,6 +467,8 @@ final class LibraryStoreTests: XCTestCase {
         XCTAssertNil(store.importError)
         XCTAssertEqual(store.comics.map(\.lastPathComponent), ["One.cbz"])
         XCTAssertEqual(try files(), [])   // nothing copied into the library folder
+        store.addInPlace(folder)
+        XCTAssertEqual(store.importError, "“\(folder.lastPathComponent)” is already in your library.")
 
         // A new file in the folder shows up (FSEvents calls refresh; here we call it directly).
         try FileManager.default.copyItem(at: comic, to: folder.appendingPathComponent("Two.cbz"))
@@ -287,6 +482,13 @@ final class LibraryStoreTests: XCTestCase {
         store.delete(try XCTUnwrap(store.comics.first))
         XCTAssertTrue(store.comics.isEmpty)
         XCTAssertTrue(FileManager.default.fileExists(atPath: first.path))
+    }
+
+    private func addComicInfo(to url: URL, _ xml: String) throws {
+        let data = Data(xml.utf8)
+        try Archive(url: url, accessMode: .update).addEntry(with: "ComicInfo.xml", type: .file, uncompressedSize: Int64(data.count)) {
+            data.subdata(in: Int($0)..<Int($0) + $1)
+        }
     }
 
     /// A folder holding two of the test comic's pages as p2.jpg and p10.jpg (only natural order reads p2
@@ -382,11 +584,7 @@ final class LibraryStoreTests: XCTestCase {
         func make(_ name: String, number: String?) throws -> URL {
             let url = dir.appendingPathComponent("\(name).cbz")
             try FileManager.default.copyItem(at: comic, to: url)
-            guard let number else { return url }
-            let xml = Data("<ComicInfo><Series>Saga</Series><Number>\(number)</Number></ComicInfo>".utf8)
-            try Archive(url: url, accessMode: .update).addEntry(with: "ComicInfo.xml", type: .file, uncompressedSize: Int64(xml.count)) {
-                xml.subdata(in: Int($0)..<Int($0) + $1)
-            }
+            if let number { try addComicInfo(to: url, "<ComicInfo><Series>Saga</Series><Number>\(number)</Number></ComicInfo>") }
             return url
         }
         let ten = try make("b", number: "10"), two = try make("a", number: "2"), loose = try make("c", number: nil)
@@ -454,6 +652,22 @@ final class LibraryStoreTests: XCTestCase {
         XCTAssertEqual(pages.pageCount, 2)
         let page = try XCTUnwrap(PageLoader.decodeSampled(data: pages.readPage(1), maxDim: 2560))
         XCTAssertEqual(page.height, 2560)   // rendered at the reader's page size
+    }
+
+    func testAnInPlaceCb7GivesItsMetadataAndCoverWithoutAFullConversion() throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).cb7")
+        try FileManager.default.copyItem(at: try XCTUnwrap(Bundle(for: Self.self).url(forResource: "Tiny", withExtension: "cb7")), to: url)
+        let converted = ComicOpener.cacheDir.appendingPathComponent(ReadingProgress.key(url).replacingOccurrences(of: "/", with: "_"))
+            .appendingPathExtension("cbz")
+        defer { for file in [url, converted] { try? FileManager.default.removeItem(at: file) } }
+
+        XCTAssertEqual(try ComicOpener.comicInfo(url)?.series, "Tiny")
+        let first = try ComicOpener.firstPage(url)
+        XCTAssertEqual(first.count, 2)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: converted.path))   // neither converted the archive
+        let opened = try ComicOpener.open(url)   // the reader does
+        XCTAssertEqual(first.page, try opened.readPage(0))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: converted.path))
     }
 
     func testAPhase2DatabaseGainsTheModeColumnAndKeepsItsRows() throws {

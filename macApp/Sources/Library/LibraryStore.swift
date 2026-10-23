@@ -19,6 +19,8 @@ final class LibraryStore: ObservableObject {
     @Published var importError: String?
     /// Each comic's ReadingProgress key, read once per scan rather than on every render.
     @Published private(set) var keys: [URL: String] = [:]
+    /// Each comic's ReadingProgress revision, so a card reloads its cover once a file being copied in is complete.
+    @Published private(set) var revisions: [URL: String] = [:]
     /// ComicInfo.xml metadata of the comics that have it, filled in the background after a scan.
     @Published private(set) var info: [URL: ComicInfo] = [:]
     /// For comics read in place: the bookmarked file or watched folder each one came from.
@@ -33,6 +35,8 @@ final class LibraryStore: ObservableObject {
     private var roots: [(url: URL, bookmark: Data, isDirectory: Bool)] = []
     private var unresolved: [Data] = []
     private var stream: FSEventStreamRef?
+    /// The scan FSEvents asked for, waiting for its burst to settle or running off the main thread.
+    private var pendingScan: Task<Void, Never>?
     private static let bookmarksKey = "chika.bookmarks.v1"
     /// The comics with a reader window open, in the order they opened, saved on every change.
     private var openComics: [URL] = []
@@ -44,9 +48,10 @@ final class LibraryStore: ObservableObject {
     private let keepsSession: Bool
     private var quitting = false
     private var quitObserver: NSObjectProtocol?
+    private var saveFailObserver: NSObjectProtocol?
     private static let openComicsKey = "chika.openComics.v1"
     // PDFs are left out of folder scans (a watched Downloads folder is full of them); add one directly.
-    static let inPlaceExtensions: Set = ["cbz", "cbr", "cb7"]
+    nonisolated static let inPlaceExtensions: Set = ["cbz", "cbr", "cb7"]
 
     /// Types the file importer allows. Includes the app's exported CBZ/CBR types plus the generic
     /// zip/archive/rar families so a plain .zip or .rar comic is selectable too.
@@ -78,7 +83,10 @@ final class LibraryStore: ObservableObject {
         ReadingProgress.migrateLegacy(in: dir)
         // shortcut: a bookmark that no longer resolves (file deleted, drive unplugged) is kept but
         // hidden, so a drive that comes back reappears; add a "missing" row if that confuses anyone.
-        for data in defaults.array(forKey: Self.bookmarksKey) as? [Data] ?? [] { resolve(data) }
+        // Saved once every bookmark is back in the list: saving at the first stale one would drop the rest.
+        var stale = false
+        for data in defaults.array(forKey: Self.bookmarksKey) as? [Data] ?? [] { if resolve(data) { stale = true } }
+        if stale { saveBookmarks() }
         watch()
         refresh()
         // Saved now, even empty: a comic gone since is never reopened later, nor one that takes its place.
@@ -92,36 +100,95 @@ final class LibraryStore: ObservableObject {
                                                               queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.quitting = true }
         }
+        saveFailObserver = NotificationCenter.default.addObserver(forName: ReadingProgress.saveDidFail, object: nil,
+                                                                  queue: .main) { [weak self] note in
+            let reason = note.object as? String ?? "unknown error"
+            MainActor.assumeIsolated { self?.report("Couldn't save your reading progress (\(reason)). Check that the disk has free space.") }
+        }
     }
 
     deinit {
         if let stream { FSEventStreamStop(stream); FSEventStreamInvalidate(stream); FSEventStreamRelease(stream) }
         if let quitObserver { NotificationCenter.default.removeObserver(quitObserver) }
+        if let saveFailObserver { NotificationCenter.default.removeObserver(saveFailObserver) }
     }
 
-    // shortcut: scans on the main thread; move off it if watched folders grow to many thousands of files.
+    /// Shows `message` in the library's alert, after any not dismissed yet (several files can fail at once).
+    func report(_ message: String) {
+        importError = importError.map { "\($0)\n\(message)" } ?? message
+    }
+
+    /// Rescans now, on the main thread: after the user adds or removes something, and at launch.
     func refresh() {
+        pendingScan?.cancel()   // older than this scan
+        followMovedRoots()
+        apply(Self.snapshot(dir, roots))
+    }
+
+    /// FSEvents' rescan: waits for a burst of changes to settle, scans off the main thread, and drops a
+    /// scan that a newer one (or `refresh()`) overtook. The task lets tests await it.
+    @discardableResult
+    func refreshSoon() -> Task<Void, Never> {
+        pendingScan?.cancel()
+        let task = Task {
+            try? await Task.sleep(for: .milliseconds(500))
+            guard !Task.isCancelled else { return }
+            followMovedRoots()
+            let (dir, roots) = (dir, roots)
+            let found = await Task.detached(priority: .utility) { Self.snapshot(dir, roots) }.value
+            guard !Task.isCancelled else { return }
+            let before = Set(comics)
+            apply(found)
+            markNew(comics.filter { !before.contains($0) })
+        }
+        pendingScan = task
+        return task
+    }
+
+    private struct Snapshot {
+        var comics: [URL], sources: [URL: URL], keys: [URL: String], revisions: [URL: String]
+    }
+
+    /// The library folder's comics, then every root's. Blocking file system work.
+    nonisolated private static func snapshot(_ dir: URL, _ roots: [(url: URL, bookmark: Data, isDirectory: Bool)]) -> Snapshot {
         let fm = FileManager.default
         var files = ((try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)) ?? [])
             .filter { ["cbz", "zip", "pdf"].contains($0.pathExtension.lowercased()) }
-        sources = [:]
+        var sources: [URL: URL] = [:]
         for root in roots {
             // A folder's kind is decided on every scan: an empty one later filled with images becomes one
             // comic, and a comic's folder that gains an archive becomes a folder of comics.
             let found = !root.isDirectory ? (fm.fileExists(atPath: root.url.path) ? [root.url] : [])
-                : FolderComic.isComic(root.url) ? [root.url] : Self.scan(root.url)
+                : FolderComic.isComic(root.url) ? [root.url] : scan(root.url)
             for url in found where sources[url] == nil {
                 sources[url] = root.url
                 files.append(url)
             }
         }
-        comics = files
-        keys = Dictionary(files.map { ($0, ReadingProgress.key($0)) }, uniquingKeysWith: { a, _ in a })
+        return Snapshot(comics: files, sources: sources,
+                        keys: Dictionary(files.map { ($0, ReadingProgress.key($0)) }, uniquingKeysWith: { a, _ in a }),
+                        revisions: Dictionary(files.compactMap { url in ReadingProgress.revision(url).map { (url, $0) } },
+                                              uniquingKeysWith: { a, _ in a }))
+    }
+
+    // Published only when changed: an unchanged rescan would redraw every library window for nothing.
+    private func apply(_ found: Snapshot) {
+        sources = found.sources
+        if comics != found.comics { comics = found.comics }
+        if keys != found.keys { keys = found.keys }
+        if revisions != found.revisions { revisions = found.revisions }
         readInfo()
     }
 
+    /// Comics new to the library sort first under Recent, like a fresh import; one opened before keeps its time.
+    private func markNew(_ urls: [URL]) {
+        guard !urls.isEmpty else { return }
+        let opened = ReadingProgress.openedMap()
+        for url in urls where keys[url].map({ opened[$0] == nil }) == true { ReadingProgress.markOpened(url) }
+    }
+
     /// A watched folder's comics: archives anywhere under it, and each subfolder holding only images as one comic.
-    private static func scan(_ folder: URL) -> [URL] {
+    nonisolated private static func scan(_ folder: URL) -> [URL] {
         guard let walk = FileManager.default.enumerator(at: folder, includingPropertiesForKeys: [.isDirectoryKey],
                                                         options: [.skipsHiddenFiles, .skipsPackageDescendants]) else { return [] }
         var found: [URL] = []
@@ -136,24 +203,59 @@ final class LibraryStore: ObservableObject {
         return found
     }
 
-    /// Imports off the main thread. The returned task lets tests await completion; the UI ignores it.
+    /// Imports off the main thread; `read` gets the copy once it is in the library. A folder with no pages
+    /// of its own imports every comic under it (archives, and folders of images), one after another.
+    /// The returned task lets tests await completion; the UI ignores it.
     @discardableResult
-    func importComic(from url: URL) -> Task<Void, Never> {
+    func importComic(from url: URL, then read: ((URL) -> Void)? = nil) -> Task<Void, Never> {
         activeImports += 1
         importing = true
         let dir = dir
         return Task {
-            do {
-                let dest = try await Task.detached(priority: .userInitiated) { try Self.install(url, into: dir) }.value
-                ReadingProgress.markOpened(dest)   // fresh import sorts to the top
-                BookPredetector.shared.add(dest)   // its panels are ready before it is first opened
-            } catch {
-                importError = "Couldn't import \(url.lastPathComponent): \(error.localizedDescription)"
+            let scoped = url.startAccessingSecurityScopedResource()   // a folder's, for the comics inside it
+            defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+            let items = await Task.detached(priority: .userInitiated) { Self.importables(url) }.value
+            if items.isEmpty { report("Couldn't import \(url.lastPathComponent): \(ImportError.emptyFolder.localizedDescription)") }
+            var imported: URL?
+            for item in items {
+                do {
+                    let dest = try await Task.detached(priority: .userInitiated) { try Self.install(item, into: dir) }.value
+                    ReadingProgress.markOpened(dest)   // fresh import sorts to the top
+                    BookPredetector.shared.add(dest)   // its panels are ready before it is first opened
+                    imported = dest
+                } catch {
+                    report("Couldn't import \(item.lastPathComponent): \(error.localizedDescription)")
+                }
             }
             activeImports -= 1
             importing = activeImports > 0
             refresh()
+            if let imported { read?(imported) }
         }
+    }
+
+    /// What importing `url` brings in: the file, a folder's own images as one comic, or (a folder with
+    /// none) every comic under it, in name order.
+    nonisolated private static func importables(_ url: URL) -> [URL] {
+        guard (try? url.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true,
+              let pages = try? FolderComic.pages(in: url), pages.isEmpty else { return [url] }
+        return scan(url).sorted { NaturalOrder.isOrderedBefore($0.path, $1.path) }
+    }
+
+    /// A comic opened from Finder (Open With, a double-click): one the library already has (read in
+    /// place) opens as it is, any other file is imported and then opened; a folder is added in place.
+    /// Returns the import, if any, for tests to await.
+    @discardableResult
+    func open(fromFinder url: URL, read: @escaping (URL) -> Void) -> Task<Void, Never>? {
+        if (try? url.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true { addInPlace(url); return nil }
+        let key = ReadingProgress.key(url)
+        if let known = comics.first(where: { keys[$0] == key }) { read(known); return nil }
+        return importComic(from: url, then: read)
+    }
+
+    /// An imported copy: a file in the library's own folder, the only kind of comic ever deleted.
+    func isImportedCopy(_ url: URL) -> Bool {
+        sources[url] == nil && url.deletingLastPathComponent().standardizedFileURL.path == dir.standardizedFileURL.path
     }
 
     /// An imported copy is deleted. A comic read in place only leaves the library: its bookmark (or
@@ -166,11 +268,22 @@ final class LibraryStore: ObservableObject {
             roots.removeAll { $0.url == root }
             saveBookmarks()
             watch()
-        } else {
-            ReadingProgress.clear(url)   // first: its key is read from the file
-            try? FileManager.default.removeItem(at: url)
+        } else if isImportedCopy(url) {
+            let key = ReadingProgress.key(url)   // read from the file, so taken while it is there
+            do {
+                try FileManager.default.removeItem(at: url)
+                ReadingProgress.clear(key: key)   // only once the comic is really gone
+            } catch {
+                report("Couldn't remove \(url.lastPathComponent): \(error.localizedDescription)")
+            }
         }
-        CoverLoader.evict(url)
+        // Neither: it already left the library (another window removed it, or its folder changed), and a
+        // file outside the library's folder is never ours to delete.
+        for url in gone {
+            CoverLoader.evict(url)
+            info[url] = nil   // a later import under the same name reads its own
+            infoRead.remove(url)
+        }
         refresh()
     }
 
@@ -208,18 +321,25 @@ final class LibraryStore: ObservableObject {
 
     // MARK: - Series
 
-    /// Reads ComicInfo.xml once per comic, off the main thread.
+    /// Reads ComicInfo.xml once per comic, off the main thread, each comic's shown as soon as it is read.
+    /// A comic that can't be read yet (still being copied in) is read again on a later scan.
     // shortcut: keyed by URL, so editing a comic's ComicInfo.xml shows after a relaunch; key by
     // modification date if anyone edits metadata while Chika runs.
     private func readInfo() {
         let pending = comics.filter { !infoRead.contains($0) }
         guard !pending.isEmpty else { return }
         infoRead.formUnion(pending)
+        let previous = infoTask
         infoTask = Task {
-            let found = await Task.detached(priority: .utility) {
-                pending.reduce(into: [URL: ComicInfo]()) { map, url in map[url] = ((try? ComicOpener.open(url)) as? CbzArchive)?.comicInfo }
-            }.value
-            info.merge(found) { $1 }
+            await previous?.value   // in order, so a comic removed and added again under its name ends with its own
+            for url in pending {
+                let read = await Task.detached(priority: .utility) { Result { try ComicOpener.comicInfo(url) } }.value
+                guard infoRead.contains(url) else { continue }   // removed meanwhile
+                switch read {
+                case .success(let found): if info[url] != found { info[url] = found }
+                case .failure: infoRead.remove(url)
+                }
+            }
         }
     }
 
@@ -253,7 +373,7 @@ final class LibraryStore: ObservableObject {
     static func arrange(_ comics: [URL], query: String, sort: Sort, unreadOnly: Bool, keys: [URL: String],
                         progress: [String: Progress], opened: [String: Double],
                         info: [URL: ComicInfo]) -> [(series: String?, comics: [URL])] {
-        let title = { (url: URL) in url.deletingPathExtension().lastPathComponent }
+        let title = { (url: URL) in url.comicTitle }
         let read = { (url: URL) -> Double in
             guard let p = keys[url].flatMap({ progress[$0] }), p.total > 0 else { return 0 }
             return Double(p.page + 1) / Double(p.total)
@@ -305,36 +425,63 @@ final class LibraryStore: ObservableObject {
     /// Adds a comic file or a folder to watch without copying it. Picked and dropped URLs carry a
     /// sandbox extension; the bookmark keeps that access across launches.
     func addInPlace(_ url: URL) {
+        guard !roots.contains(where: { $0.url.standardizedFileURL == url.standardizedFileURL }) else {
+            report("“\(url.lastPathComponent)” is already in your library.")
+            return
+        }
         let scoped = url.startAccessingSecurityScopedResource()
         defer { if scoped { url.stopAccessingSecurityScopedResource() } }
         do {
             let data = try url.bookmarkData(options: .withSecurityScope, includingResourceValuesForKeys: nil, relativeTo: nil)
-            guard !roots.contains(where: { $0.url.standardizedFileURL == url.standardizedFileURL }) else { return }
             resolve(data)
             saveBookmarks()
             watch()
+            let before = Set(comics)
             refresh()
+            markNew(comics.filter { !before.contains($0) })
         } catch {
-            importError = "Couldn't add \(url.lastPathComponent): \(error.localizedDescription)"
+            report("Couldn't add \(url.lastPathComponent): \(error.localizedDescription)")
         }
     }
 
-    /// Resolves a bookmark and starts (and keeps, for the app's lifetime) its security scope.
-    private func resolve(_ data: Data) {
+    /// Resolves a bookmark and starts (and keeps, for the app's lifetime) its security scope. True when
+    /// it was stale and has been refreshed, so the caller saves the list.
+    @discardableResult
+    private func resolve(_ data: Data) -> Bool {
         var stale = false
         guard let url = try? URL(resolvingBookmarkData: data, options: .withSecurityScope, bookmarkDataIsStale: &stale) else {
             unresolved.append(data)
-            return
+            return false
         }
         _ = url.startAccessingSecurityScopedResource()
         let fresh = stale ? (try? url.bookmarkData(options: .withSecurityScope, includingResourceValuesForKeys: nil, relativeTo: nil)) ?? data : data
         roots.append((url, fresh, (try? url.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true))
-        if stale { saveBookmarks() }
+        return stale
+    }
+
+    /// A folder or file read in place that was renamed or moved while Chika runs is found again through
+    /// its bookmark, so its comics don't vanish until a relaunch.
+    private func followMovedRoots() {
+        var moved = false
+        for i in roots.indices where !FileManager.default.fileExists(atPath: roots[i].url.path) {
+            var stale = false
+            guard let url = try? URL(resolvingBookmarkData: roots[i].bookmark, options: .withSecurityScope, bookmarkDataIsStale: &stale),
+                  url.path != roots[i].url.path, FileManager.default.fileExists(atPath: url.path) else { continue }
+            _ = url.startAccessingSecurityScopedResource()
+            let fresh = try? url.bookmarkData(options: .withSecurityScope, includingResourceValuesForKeys: nil, relativeTo: nil)
+            roots[i] = (url, fresh ?? roots[i].bookmark, roots[i].isDirectory)
+            moved = true
+        }
+        if moved {
+            saveBookmarks()
+            watch()   // the stream watches paths: point it at the new one
+        }
     }
 
     private func saveBookmarks() { defaults.set(roots.map(\.bookmark) + unresolved, forKey: Self.bookmarksKey) }
 
-    /// One FSEvents stream over every folder added (recursive), so new comics appear by themselves.
+    /// One FSEvents stream over every folder added (recursive), so new comics appear by themselves. It
+    /// also reports a watched folder itself being renamed or moved (WatchRoot), which the rescan follows.
     private func watch() {
         if let stream { FSEventStreamStop(stream); FSEventStreamInvalidate(stream); FSEventStreamRelease(stream) }
         stream = nil
@@ -345,9 +492,9 @@ final class LibraryStore: ObservableObject {
         stream = FSEventStreamCreate(nil, { _, info, _, _, _, _ in
             guard let info else { return }
             let store = Unmanaged<LibraryStore>.fromOpaque(info).takeUnretainedValue()
-            MainActor.assumeIsolated { store.refresh() }
+            MainActor.assumeIsolated { _ = store.refreshSoon() }
         }, &context, folders as CFArray, FSEventStreamEventId(kFSEventStreamEventIdSinceNow), 1.0,
-           FSEventStreamCreateFlags(kFSEventStreamCreateFlagNone))
+           FSEventStreamCreateFlags(kFSEventStreamCreateFlagWatchRoot))
         if let stream {
             FSEventStreamSetDispatchQueue(stream, .main)   // the callback's assumeIsolated relies on this
             FSEventStreamStart(stream)
@@ -355,11 +502,13 @@ final class LibraryStore: ObservableObject {
     }
 
     private enum ImportError: LocalizedError {
-        case unsupported, noImages
+        case unsupported, noImages, emptyFolder, incompleteFolder
         var errorDescription: String? {
             switch self {
             case .unsupported: return "Choose a CBZ, CBR, CB7, PDF, ZIP, RAR or 7z comic, or a folder of images."
             case .noImages: return "No image pages found in this archive."
+            case .emptyFolder: return "No comics or images found in this folder."
+            case .incompleteFolder: return "Not every image in this folder could be copied."
             }
         }
     }
@@ -382,7 +531,7 @@ final class LibraryStore: ObservableObject {
                 if isFolder {
                     // Only its pages, as the folder reads in place: subfolders and other files stay behind.
                     let pages = try FolderComic.pages(in: readableURL)
-                    guard !pages.isEmpty else { throw ImportError.noImages }
+                    guard !pages.isEmpty else { throw ImportError.emptyFolder }
                     folderPages = pages.count
                     try fm.createDirectory(at: source, withIntermediateDirectories: false)
                     for page in pages { try fm.copyItem(at: page, to: source.appendingPathComponent(page.lastPathComponent)) }
@@ -406,9 +555,9 @@ final class LibraryStore: ObservableObject {
         case .unknown: throw ImportError.unsupported
         }
         let pageCount = try ComicOpener.open(ready).pageCount
-        guard pageCount > 0 else { throw ImportError.noImages }
+        guard pageCount > 0 else { throw isFolder ? ImportError.emptyFolder : ImportError.noImages }
         // Every page copied from a folder must have made it into the archive.
-        guard !isFolder || pageCount == folderPages else { throw ImportError.noImages }
+        guard !isFolder || pageCount == folderPages else { throw ImportError.incompleteFolder }
 
         let base = isFolder ? url.lastPathComponent : url.deletingPathExtension().lastPathComponent
         var n = 1

@@ -42,7 +42,7 @@ final class ReaderModel: ObservableObject {
     private(set) var pageCount = 1
     /// The file's ReadingProgress.revision when it was opened: detections of its pages are stored under it.
     private(set) var revision: String?
-    var title: String { comicURL.deletingPathExtension().lastPathComponent }
+    var title: String { comicURL.comicTitle }
 
     private var loader: PageLoader?
     private var loadToken = 0
@@ -177,7 +177,7 @@ final class ReaderModel: ObservableObject {
     /// detection (the reader's or the background pre-detection's).
     func knownRegions(_ page: Int) -> [Panel]? {
         if let known = overrides[page] ?? panelCache[page] { return known }
-        panelCache[page] = ReadingProgress.detection(comicURL, page: page, rtl: rightToLeft)?.regions
+        panelCache[page] = ReadingProgress.detection(comicURL, page: page, rtl: rightToLeft, revision: revision)?.regions
         return panelCache[page]
     }
 

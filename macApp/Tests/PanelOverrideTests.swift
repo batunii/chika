@@ -45,7 +45,7 @@ final class PanelOverrideTests: XCTestCase {
         XCTAssertNil(ReadingProgress.panelOverride(a, page: 1))
 
         ReadingProgress.setPanelOverride(b, page: 2, panels: [left])
-        ReadingProgress.clear(a)
+        ReadingProgress.clear(key: ReadingProgress.key(a))
         XCTAssertNil(ReadingProgress.panelOverride(a, page: 2))
         XCTAssertEqual(ReadingProgress.panelOverride(b, page: 2), [left])
     }
@@ -146,6 +146,6 @@ final class PanelOverrideTests: XCTestCase {
         while model.detecting, Date.now < landed { try await Task.sleep(for: .milliseconds(20)) }
         XCTAssertFalse(model.detecting)
         XCTAssertNotNil(model.slots.regions)
-        XCTAssertNotNil(ReadingProgress.detection(comic, page: 0, rtl: true))   // stored for the flipped direction too
+        XCTAssertNotNil(ReadingProgress.detection(comic, page: 0, rtl: true, revision: ReadingProgress.revision(comic)))   // stored for the flipped direction too
     }
 }
