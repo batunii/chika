@@ -33,11 +33,14 @@ public enum WindowSnap {
     }
 
     /// Where a window of `size` reopens, `saved` being its last frame on that screen: in the same
-    /// corner if it was in one, else with the same top-left. Nil when `saved` is off the screen now
-    /// (it shrank or rearranged), so the window centres instead.
+    /// corner if it was in one, else with the same top-left, pulled back inside `area` (keeping its
+    /// top-left on screen if it is too big). Nil when `saved` is off the screen now (it shrank or
+    /// rearranged), so the window centres instead.
     public static func restore(_ saved: CGRect, size: CGSize, in area: CGRect) -> CGPoint? {
         guard area.intersects(saved) else { return nil }
         if let corner = corner(near: saved, in: area, reach: 1) { return origin(corner, size: size, in: area) }
-        return CGPoint(x: saved.minX, y: saved.maxY - size.height)
+        // The old frame touching the screen says nothing about the new size, which can land off it.
+        return CGPoint(x: max(min(saved.minX, area.maxX - size.width), area.minX),
+                       y: min(max(saved.maxY - size.height, area.minY), area.maxY - size.height))
     }
 }

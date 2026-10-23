@@ -46,6 +46,8 @@ private struct ReaderContent: View {
     @State private var editing = false
     // A page number being typed: Return jumps to it; it goes 1.5 s after the last digit.
     @State private var typedPage = ""
+    /// Counts digit presses, so each one restarts the entry's timeout even when the digits stay the same.
+    @State private var typedKeys = 0
     @StateObject private var translator = BalloonTranslator()
     @StateObject private var speaker = BalloonSpeaker()
     @State private var voiceOver = NSWorkspace.shared.isVoiceOverEnabled
@@ -146,6 +148,7 @@ private struct ReaderContent: View {
             guard !editing, press.modifiers.isDisjoint(with: [.command, .control, .option]),
                   let digit = press.characters.first, digit.isASCII else { return .ignored }
             typedPage = PageJump.append(digit, to: typedPage, pageCount: model.pageCount)
+            typedKeys += 1
             return .handled
         }
         // With nothing typed Return keeps its meaning (the next issue on the last page).
@@ -155,7 +158,7 @@ private struct ReaderContent: View {
             model.goToPage(page)
             return .handled
         }
-        .task(id: typedPage) {
+        .task(id: typedKeys) {
             guard !typedPage.isEmpty, (try? await Task.sleep(for: .seconds(1.5))) != nil else { return }
             typedPage = ""
         }

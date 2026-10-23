@@ -37,4 +37,14 @@ struct WindowSnapTests {
         #expect(WindowSnap.restore(loose, size: CGSize(width: 420, height: 200), in: screen) == CGPoint(x: 500, y: 400))
         #expect(WindowSnap.restore(CGRect(x: 3000, y: 0, width: 420, height: 300), size: loose.size, in: screen) == nil)
     }
+
+    @Test func aNewSizeIsPulledBackOnScreen() {
+        // Only a sliver of the old frame was on screen (a smaller display now): the new, narrower
+        // window would sit wholly past the left and bottom edges, so it is pulled inside.
+        let sliver = CGRect(x: -400, y: -290, width: 420, height: 300)
+        #expect(WindowSnap.restore(sliver, size: CGSize(width: 200, height: 150), in: screen) == CGPoint(x: 0, y: 0))
+        // Past the right and top edges, likewise.
+        let high = CGRect(x: 1430, y: 895, width: 420, height: 300)
+        #expect(WindowSnap.restore(high, size: CGSize(width: 420, height: 300), in: screen) == CGPoint(x: 1020, y: 600))
+    }
 }
