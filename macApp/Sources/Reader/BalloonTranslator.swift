@@ -217,6 +217,7 @@ struct BalloonLabels: View {
                     .position(x: CGFloat(balloon.box.centerX) * geo.size.width, y: CGFloat(balloon.box.centerY) * geo.size.height)
             }
         }
+        .accessibilityHidden(true)   // VoiceOver reads the balloons from BalloonAccessibility, in reading order
     }
 }
 
@@ -236,8 +237,5 @@ private struct BalloonLabel: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(balloon.paper, in: RoundedRectangle(cornerRadius: fontSize * 1.5, style: .continuous))
             .onHover { original = $0 }
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel(balloon.translated ?? "")
-            .accessibilityHint("Original: \(balloon.original)")
     }
 }

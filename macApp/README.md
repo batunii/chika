@@ -149,6 +149,16 @@ every balloon of the spread, in reading order; then it steps on like the arrow k
 the end of the comic. A panel with no text gets about 1.5 s, a whole-page view a short beat. Stepping
 by hand cuts the balloon off and carries on from the new place. Settings (⌘,) sets the speed.
 
+## VoiceOver
+
+With VoiceOver on, the page in Panels and Two pages says where you are ("Page 4 of 20, panel 2 of
+5", "Pages 4 and 5 of 20") and the arrow keys read on. Inside it, the speech balloons of the view on
+screen are elements in reading order, the same ones Read aloud would speak: the panel's balloons in
+Panels mode, every balloon on a whole page or a spread. Each says the translation when Translate is on
+and has one (with the original as its hint), else the text off the page. A view with no text says
+"no text" once it has been read. VoiceOver alone is enough to have the balloons read (with Translate and
+Read aloud off), using the same stored text; nothing changes on screen.
+
 ## Training export
 
 File > Export Panel Corrections… turns pages fixed in the panel editor into training data for the

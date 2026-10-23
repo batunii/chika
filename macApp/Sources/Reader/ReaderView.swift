@@ -43,6 +43,7 @@ private struct ReaderContent: View {
     @State private var editing = false
     @StateObject private var translator = BalloonTranslator()
     @StateObject private var speaker = BalloonSpeaker()
+    @State private var voiceOver = NSWorkspace.shared.isVoiceOverEnabled
 
     private var isReady: Bool { model.state == .ready }
     private var marked: Bool { !model.marksHere.isEmpty }
@@ -132,11 +133,13 @@ private struct ReaderContent: View {
         .onChange(of: editing) { model.editingPanels = editing }
         .onDisappear { model.editingPanels = false; speaker.isOn = false; translator.stop() }
         // Translate (and Read aloud's text) follows the pages on screen once they (and in Panels mode their panels) are in.
-        .onChange(of: [translator.isOn, speaker.isOn, model.waitingForPage, settings.translationTarget, model.rightToLeft,
+        .onReceive(NSWorkspace.shared.publisher(for: \.isVoiceOverEnabled)) { voiceOver = $0 }
+        // VoiceOver reads the balloons too, so their text is read with Translate and Read aloud off.
+        .onChange(of: [translator.isOn, speaker.isOn, voiceOver, model.waitingForPage, settings.translationTarget, model.rightToLeft,
                        model.pageImages.map(\.page)] as [AnyHashable], initial: true) {
             translator.show(model.waitingForPage ? [] : model.pageImages, of: model.comicURL,
                             revision: model.revision, rtl: model.rightToLeft, target: settings.targetLanguage,
-                            aloud: speaker.isOn)
+                            aloud: speaker.isOn || voiceOver)
         }
         .translationTask(translator.configuration) { session in await translator.translate(with: session) }
         // Read aloud: each view's balloons, then one step on, like the arrow key; any step starts the new view.
@@ -187,6 +190,24 @@ private struct ReaderContent: View {
         translator.isOn ? translator.balloons[page] ?? [] : []
     }
 
+    /// VoiceOver's elements for a page's balloons in the view on screen: the panel's in Panels mode, the
+    /// page's on a whole page and in Two pages.
+    private func voiceOverBalloons(_ page: Int) -> [PageAccessibility.Element] {
+        guard !editing else { return [] }
+        let onPanel = model.mode == .panels && model.slots.onPanel
+        return PageAccessibility.elements(translator.balloons[page] ?? [], step: onPanel ? model.slots.step : nil,
+                                          of: model.slots.regions ?? [], rightToLeft: model.rightToLeft,
+                                          translate: translator.isOn, target: settings.targetLanguage)
+    }
+
+    /// VoiceOver's label for the page: where the reader is, and whether the view has no text once it is read.
+    private var pageAccessibilityLabel: String {
+        let read = voiceOver && !model.waitingForPage && !translator.reading && !model.pageImages.isEmpty
+        let panel = model.mode == .panels && model.slots.onPanel ? (model.slots.step, model.slots.panelCount) : nil
+        return PageAccessibility.label(pages: model.visiblePages, of: model.pageCount, panel: panel,
+                                       hasText: read ? model.visiblePages.contains { !voiceOverBalloons($0).isEmpty } : nil)
+    }
+
     /// Read aloud's outline, on the page it is speaking from.
     private func spoken(_ page: Int) -> Panel? {
         speaker.current.flatMap { $0.page == page ? $0.box : nil }
@@ -229,6 +250,9 @@ private struct ReaderContent: View {
             Reticle(color: Chika.crimson.opacity(0.45), inset: 6, length: 16, stroke: 2).padding(6)
         } }
         .contentShape(Rectangle())
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(pageAccessibilityLabel)
+        .accessibilityHint(PageAccessibility.hint)
         // Double-click is declared first so a single click waits for it to be ruled out.
         .onTapGesture(count: 2) { wholePage() }
         .onTapGesture { location in tapZone(x: location.x, width: size.width) }
@@ -264,6 +288,7 @@ private struct ReaderContent: View {
                     .frame(width: CGFloat(cg.width), height: CGFloat(cg.height))
                     .overlay { BalloonLabels(balloons: labels(model.imagePages.first ?? -1)) }
                     .overlay { SpokenBalloon(box: spoken(model.imagePages.first ?? -1)) }
+                    .overlay { BalloonAccessibility(elements: voiceOverBalloons(model.imagePages.first ?? -1)) }
                     // Here dim darkens around the panel instead: drawn in page coordinates under the
                     // same transform, so it stays on the panel through camera tweens, zoom and pan.
                     .modifier(NightFilterEffect(filter: around ? .off : filter))
@@ -294,6 +319,7 @@ private struct ReaderContent: View {
                 Image(decorative: page.1, scale: 1).resizable().scaledToFit()
                     .overlay { BalloonLabels(balloons: labels(page.0)) }
                     .overlay { SpokenBalloon(box: spoken(page.0)) }
+                    .overlay { BalloonAccessibility(elements: voiceOverBalloons(page.0)) }
             }
         }
         .modifier(NightFilterEffect(filter: settings.nightFilter))
