@@ -630,6 +630,24 @@ final class LibraryStoreTests: XCTestCase {
         XCTAssertNil(LibraryStore.lastOpened(urls, keys: keys, opened: [:]))
     }
 
+    func testAnOpenedButUnreadComicCountsAsUnread() {
+        let opened = Progress(page: 0, step: -1, total: 3), panel = Progress(page: 0, step: 1, total: 3)
+        XCTAssertFalse(opened.started)
+        XCTAssertEqual(opened.fraction, 0)   // the card's bar is empty, not a third full
+        XCTAssertTrue(panel.started)
+        XCTAssertEqual(panel.fraction, 1.0 / 3, accuracy: 1e-9)
+        let one = URL(fileURLWithPath: "/c/one.cbz"), read = URL(fileURLWithPath: "/c/read.cbz"), some = URL(fileURLWithPath: "/c/some.cbz")
+        let keys = [one: "one", read: "read", some: "some"]
+        let progress = ["one": Progress(page: 0, step: -1, total: 1), "read": Progress(page: 0, step: 0, total: 1),
+                        "some": Progress(page: 1, step: -1, total: 10)]
+        func arrange(_ sort: LibraryStore.Sort, unreadOnly: Bool = false) -> [URL] {
+            LibraryStore.arrange([some, read, one], query: "", sort: sort, unreadOnly: unreadOnly, keys: keys,
+                                 progress: progress, opened: [:], info: [:]).flatMap(\.comics)
+        }
+        XCTAssertEqual(arrange(.unread), [one, some, read])
+        XCTAssertEqual(arrange(.title, unreadOnly: true), [one, some])   // a one-page comic only opened is not finished
+    }
+
     func testCb7ConvertsAndPdfImportsAsIs() async throws {
         let store = LibraryStore(directory: dir, defaults: ReadingProgress.defaults)
         await store.importComic(from: try XCTUnwrap(Bundle(for: Self.self).url(forResource: "Tiny", withExtension: "cb7"))).value

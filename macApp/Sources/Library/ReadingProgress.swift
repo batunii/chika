@@ -13,6 +13,12 @@ struct Progress: Codable, Equatable {
     // global default.
     var rtl: Bool?
     var mode: String?  // ReadingMode raw value; nil = never chosen → panels
+
+    /// Read past the opening: a later page, or a panel of the first. One rule for the cards, the Unread
+    /// sort and Continue reading, so an opened but unread comic is unread everywhere.
+    var started: Bool { page > 0 || step >= 0 }
+    /// How far through once started, page 0 counting as page 1 (Android's fill); 0 before.
+    var fraction: Double { started && total > 0 ? min(Double(page + 1) / Double(total), 1) : 0 }
 }
 
 /// A spot the reader marked in a comic: a page and its panel (-1 = the whole page).

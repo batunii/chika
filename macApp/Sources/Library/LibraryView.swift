@@ -14,7 +14,7 @@ struct LibraryView: View {
     // What the picker does: import copies, or add files/folders in place. Kept apart from
     // showPicker because the importer clears that before its completion runs.
     @State private var pickMode = PickMode.importCopies
-    private enum PickMode { case importCopies, inPlace }
+    enum PickMode { case importCopies, inPlace }
     // Comic awaiting delete confirmation (Android shows a "Remove comic?" dialog before deleting).
     @State private var pendingDelete: URL?
     // Resume snapshot keyed by ReadingProgress.key, so cards show fresh progress without resetting scroll.
@@ -23,6 +23,12 @@ struct LibraryView: View {
     @State private var query = ""
     @AppStorage("chika.library.sort") private var sort = LibraryStore.Sort.recent
     @AppStorage("chika.library.unreadOnly") private var unreadOnly = false
+    // The window, not the search field, takes keys at launch: stray keys would filter the grid unseen.
+    private enum Focus { case library, search }
+    @FocusState private var focus: Focus?
+
+    /// The library window, which File > Show Library (⌘N) brings forward rather than open a second.
+    static let window = WeakWindow()
 
     // Top-aligned so covers line up when titles and issue lines differ in height.
     private let columns = [GridItem(.adaptive(minimum: 170, maximum: 220), spacing: 24, alignment: .top)]
@@ -43,6 +49,19 @@ struct LibraryView: View {
         }
         .frame(minWidth: 760, minHeight: 520)
         .preferredColorScheme(.dark)
+        .tint(Chika.ochre)
+        .focusable()
+        .focusEffectDisabled()
+        .focused($focus, equals: .library)
+        .defaultFocus($focus, .library)
+        .background {
+            Button("Find") { focus = .search }
+                .keyboardShortcut("f", modifiers: .command)
+                .opacity(0)
+                .accessibilityHidden(true)
+        }
+        // File > Import Comics… (⌘O) and Add in Place… (⇧⌘O) open this window's picker (ChikaCommands).
+        .focusedSceneValue(\.libraryPicker) { mode in pickMode = mode; showPicker = true }
         .onDrop(of: [.fileURL], isTargeted: nil) { providers in
             for provider in providers {
                 _ = provider.loadObject(ofClass: URL.self) { url, _ in
@@ -86,6 +105,7 @@ struct LibraryView: View {
             Text(pendingDelete.map(removalMessage) ?? "")
         }
         .onAppear {
+            focus = .library
             progress = ReadingProgress.all()
             opened = ReadingProgress.openedMap()
             ShortcutTarget.library = library
@@ -99,13 +119,28 @@ struct LibraryView: View {
         }
         .onOpenURL { url in library.open(fromFinder: url) { openWindow(id: "reader", value: $0) } }
         .handlesExternalEvents(preferring: ["*"], allowing: ["*"])   // see ChikaApp
+        .background(WindowFinder(window: Self.window))
     }
 
     private var libraryControls: some View {
         HStack(spacing: 10) {
             TextField("Search title, series, writer", text: $query)
                 .textFieldStyle(.roundedBorder)
+                .focused($focus, equals: .search)
+                .onExitCommand { query = "" }
+                .overlay(alignment: .trailing) {
+                    if !query.isEmpty {
+                        Button { query = "" } label: {
+                            Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
+                        }
+                        .buttonStyle(.plain)
+                        .padding(.trailing, 5)
+                        .help("Clear search (Esc)")
+                        .accessibilityLabel("Clear search")
+                    }
+                }
                 .frame(width: 200)
+                .help("Search title, series or writer (⌘F)")
             Picker("Sort", selection: $sort) {
                 ForEach(LibraryStore.Sort.allCases, id: \.self) { Text($0.rawValue).tag($0) }
             }
@@ -165,11 +200,10 @@ struct LibraryView: View {
                     .foregroundColor(Chika.cream)
                     .frame(width: 36, height: 36)
             }
-            .keyboardShortcut("o", modifiers: [.command, .shift])
             .accessibilityLabel("Add comics or folders in place")
             .help("Read comics or watch folders where they are, without copying (⇧⌘O)")
             importButton
-                .keyboardShortcut("o", modifiers: .command)
+                .help("Import copies of comics or folders (⌘O)")
         }
         .buttonStyle(.plain)
         .padding(.horizontal, 28).padding(.vertical, 22)
@@ -194,7 +228,6 @@ struct LibraryView: View {
             .clipShape(RoundedRectangle(cornerRadius: 6))
         }
         .buttonStyle(.plain)
-        .disabled(library.importing)
     }
 
     private var emptyLibrary: some View {
@@ -220,8 +253,9 @@ struct LibraryView: View {
                 let groups = LibraryStore.arrange(library.comics, query: query, sort: sort, unreadOnly: unreadOnly,
                                                   keys: library.keys, progress: progress, opened: opened, info: library.info)
                 let shown = groups.reduce(0) { $0 + $1.comics.count }
-                let resume = query.trimmingCharacters(in: .whitespaces).isEmpty
-                    ? LibraryStore.continueReading(library.comics, keys: library.keys, progress: progress, opened: opened) : []
+                let searching = !query.trimmingCharacters(in: .whitespaces).isEmpty
+                let resume = searching ? []
+                    : LibraryStore.continueReading(library.comics, keys: library.keys, progress: progress, opened: opened)
                 if !resume.isEmpty {
                     KickerText("Continue Reading", size: 13, color: Chika.ochre)
                     ScrollView(.horizontal, showsIndicators: false) {
@@ -246,7 +280,13 @@ struct LibraryView: View {
                     libraryControls
                 }
                 if shown == 0 {
-                    Text("No comics match.").font(.archivo(14)).foregroundColor(Chika.creamMuted).padding(.vertical, 24)
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("No comics match.").font(.archivo(14)).foregroundColor(Chika.creamMuted)
+                        Button(unreadOnly ? "Show all comics" : "Clear search") { query = ""; unreadOnly = false }
+                            .buttonStyle(.plain)
+                            .font(.archivo(13, weight: 700)).foregroundColor(Chika.ochre)
+                    }
+                    .padding(.vertical, 24)
                 }
                 ForEach(groups, id: \.series) { group in
                     // Section titles only once there is a series to tell apart.
@@ -256,7 +296,8 @@ struct LibraryView: View {
                     }
                     LazyVGrid(columns: columns, alignment: .leading, spacing: 28) {
                         ForEach(group.comics, id: \.self) { url in card(url) }
-                        if group.series == groups.last?.series {
+                        // Not among search or Unread only results, where it reads as one of them.
+                        if group.series == groups.last?.series && !searching && !unreadOnly {
                             AddTile(importing: library.importing) { pickMode = .importCopies; showPicker = true }
                         }
                     }
@@ -274,6 +315,8 @@ struct LibraryView: View {
                       revision: library.revisions[url])
         }
         .buttonStyle(.plain)
+        // The whole title (cards cut it at two lines) and, read in place, where it comes from: same-named comics differ.
+        .help(url.comicTitle + (library.sources[url].map { " — " + $0.lastPathComponent } ?? ""))
         .contextMenu {
             Button("Open") { openWindow(id: "reader", value: url) }
             if let folder = library.sources[url], folder != url {
@@ -307,14 +350,13 @@ struct ComicCard: View {
     private var title: String { url.comicTitle.uppercased() }
     private var lastPage: Int { progress?.page ?? 0 }
     private var pageCount: Int { progress?.total ?? pages }
-    private var started: Bool { lastPage > 0 }
+    private var started: Bool { progress?.started ?? false }
     // "Vol. 2 · #3 · Writer" from ComicInfo.xml, when it has any of them.
     private var issueLine: String? {
         let parts = [info?.volume.map { "Vol. \($0)" }, info?.number.map { "#\($0)" }, info?.writer].compactMap { $0 }
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
-    // Android's fill formula: (lastPage + 1) / pageCount; page 0 already counts as "on page 1".
-    private var pct: Double { pageCount > 0 ? min(max(Double(lastPage + 1) / Double(pageCount), 0), 1) : 0 }
+    private var pct: Double { progress?.fraction ?? 0 }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -355,10 +397,12 @@ struct ComicCard: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.top, 2)
             }
+            // A dash, not "0 pages", until the cover loader has counted them.
             Text(started
                  ? "\(Int(pct * 100))% · pg \(lastPage + 1)/\(pageCount)"
-                 : "\(pageCount) pages")
+                 : pageCount > 0 ? "\(pageCount) pages" : "–")
                 .font(.archivo(12)).foregroundColor(Chika.creamMuted)
+                .accessibilityHidden(!started && pageCount == 0)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.top, 2)
         }
@@ -414,5 +458,17 @@ struct AddTile: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+    }
+}
+
+/// Hands a view's NSWindow to `window`.
+struct WindowFinder: NSViewRepresentable {
+    let window: WeakWindow
+
+    func makeNSView(context: Context) -> NSView { NSView() }
+
+    func updateNSView(_ view: NSView, context: Context) {
+        // The view joins its window after this first update, so look it up on the next turn.
+        DispatchQueue.main.async { if let found = view.window { window.value = found } }
     }
 }

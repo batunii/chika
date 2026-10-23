@@ -103,42 +103,9 @@ private struct ReaderContent: View {
                 .keyboardShortcut(.escape, modifiers: [])
             }
         }
-        // Page turns have no visible button; these invisible ones carry ⌘[ / ⌘], the modes, ⌥⌘N, ⌘D,
-        // ⇧⌘E and ⌘E, and the top bar's ⌘0, ⇧⌘T, ⇧⌘R and ⇧⌘P (the More menu shows some, a narrow window
-        // folds the others into it, and a menu's shortcuts may not fire until it has been opened). Off
-        // while editing panels, so the page under the editor stays put.
+        // The menu bar's Reader menu (ChikaCommands) carries the reader's shortcuts, so they show and can be found.
+        .focusedSceneValue(\.reader, commands)
         .background {
-            Group {
-                Button("Previous page") { model.turnPage(next: false) }
-                    .keyboardShortcut("[", modifiers: .command)
-                Button("Next page") { model.turnPage(next: true) }
-                    .keyboardShortcut("]", modifiers: .command)
-                Button("Show whole page") { wholePage() }
-                    .keyboardShortcut("0", modifiers: .command)
-                    .disabled(model.mode != .panels)
-                Button("Translate") { translator.isOn.toggle() }
-                    .keyboardShortcut("t", modifiers: [.command, .shift])
-                    .disabled(model.mode == .scroll)
-                Button("Peek") { openPeek() }
-                    .keyboardShortcut("p", modifiers: [.command, .shift])
-                ForEach(Array(ReadingMode.allCases.enumerated()), id: \.element) { i, mode in
-                    Button(mode.title) { model.setMode(mode) }
-                        .keyboardShortcut(KeyEquivalent(Character("\(i + 1)")), modifiers: .command)
-                }
-                Button("Next night filter") { settings.nightFilter = settings.nightFilter.next }
-                    .keyboardShortcut("n", modifiers: [.command, .option])
-                Button("Toggle bookmark") { model.toggleBookmark() }
-                    .keyboardShortcut("d", modifiers: .command)
-                Button("Export panel") { exportPanel() }
-                    .keyboardShortcut("e", modifiers: [.command, .shift])
-                Button("Edit panels") { editPanels() }
-                    .keyboardShortcut("e", modifiers: .command)
-                Button("Read aloud") { toggleReadAloud() }
-                    .keyboardShortcut("r", modifiers: [.command, .shift])
-            }
-            .disabled(editing || !isReady)   // while opening, a mode change would save page 1 over the saved position
-            .opacity(0)
-            .accessibilityHidden(true)
             // Also while editing panels. View > Enter Full Screen (⌃⌘F) comes with the window; ⌘F is the reader's own.
             Button("Toggle full screen") { NSApp.keyWindow?.toggleFullScreen(nil) }
                 .keyboardShortcut("f", modifiers: .command)
@@ -244,6 +211,14 @@ private struct ReaderContent: View {
             }
             speaker.isCurrent = { [self] key in key == AnyHashable(aloudKey) }
         }
+    }
+
+    /// None while opening (a mode change would save page 1 over the saved position) or editing panels
+    /// (the page under the editor stays put).
+    private var commands: ReaderCommands? {
+        guard isReady && !editing else { return nil }
+        return ReaderCommands(model: model, wholePage: wholePage, translate: { translator.isOn.toggle() },
+                              readAloud: toggleReadAloud, peek: openPeek, editPanels: editPanels, exportPanel: exportPanel)
     }
 
     private func toggleReadAloud() {
@@ -499,7 +474,7 @@ private struct ReaderContent: View {
     }
 
     /// The full row while the title keeps about 160 pt, else Translate, Read aloud, the direction and
-    /// Peek fold into the More menu (their shortcuts are the hidden buttons', so they still work).
+    /// Peek fold into the More menu (their shortcuts are the Reader menu's, so they still work).
     private var topBar: some View {
         ViewThatFits(in: .horizontal) {
             topBarRow(compact: false)

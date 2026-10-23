@@ -56,7 +56,6 @@ struct SettingsView: View {
                         .labelsHidden()
                         .fixedSize()
                         .help("Invert, sepia or dim the reader's pages (dim darkens around the panel in Panels mode)")
-                        .accessibilityLabel("Night filter")
                     }
                     .padding(.init(top: 12, leading: 16, bottom: 12, trailing: 10))
                     .background(Chika.inkSoft)
@@ -99,9 +98,9 @@ struct SettingsView: View {
                             ForEach(languages, id: \.self) { Text(Self.name($0)).tag($0) }
                         }
                         .labelsHidden()
-                        .fixedSize()
+                        // Fixed: sized to fit, it widens once the languages load and squeezes the description.
+                        .frame(width: 180)
                         .help("The language Translate writes the balloons in")
-                        .accessibilityLabel("Translate into")
                     }
                     .padding(.init(top: 12, leading: 16, bottom: 12, trailing: 10))
                     .background(Chika.inkSoft)
@@ -174,8 +173,13 @@ struct SettingsView: View {
                 .padding(.horizontal, 24)
                 .padding(.vertical, 28)
             }
+            // Kept below an opaque title bar: the content would scroll under the traffic lights and title.
+            .clipped()
         }
         .frame(width: 480, height: 620)
+        .toolbarBackground(settings.ground, for: .windowToolbar)
+        .toolbarBackgroundVisibility(.visible, for: .windowToolbar)
+        .tint(Chika.ochre)
         .task {
             let ids = Set(await LanguageAvailability().supportedLanguages.map(\.minimalIdentifier))
             // A choice the list no longer has stays pickable rather than blanking the picker.
@@ -203,38 +207,44 @@ private struct ToggleRow: View {
     @Binding var isOn: Bool
 
     var body: some View {
-        HStack(alignment: .center, spacing: 12) {
+        Toggle(isOn: $isOn) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(title).font(.archivo(14, weight: 700)).foregroundColor(Chika.cream)
                 Text(subtitle)
                     .font(.archivo(10.5, weight: 500)).lineSpacing(3).foregroundColor(Chika.creamMuted)
             }
-            Spacer(minLength: 0)
-            ChikaSwitch(isOn: $isOn)
         }
-        .padding(.init(top: 12, leading: 16, bottom: 12, trailing: 10))
-        .background(Chika.inkSoft)
-        .clipShape(RoundedCornerShape(cornerRadius: 6))
-        .contentShape(Rectangle())
-        .onTapGesture { withAnimation(.easeInOut(duration: 0.15)) { isOn.toggle() } }
+        .toggleStyle(ChikaSwitchStyle())
     }
 }
 
 /// Brand-styled switch: ochre track + ink thumb when on, ink track + muted-cream thumb when off,
-/// matching Android's SwitchDefaults colors (stock SwiftUI Toggle can't recolor the thumb).
-private struct ChikaSwitch: View {
-    @Binding var isOn: Bool
-
-    var body: some View {
-        ZStack(alignment: isOn ? .trailing : .leading) {
-            Capsule()
-                .fill(isOn ? Chika.ochre : Chika.ink)
-                .overlay(Capsule().stroke(isOn ? Chika.ochre : Chika.creamMuted, lineWidth: 2))
-            Circle()
-                .fill(isOn ? Chika.ink : Chika.creamMuted)
-                .padding(3)
+/// matching Android's SwitchDefaults colors (stock SwiftUI Toggle can't recolor the thumb). A style,
+/// so the row stays a real toggle for the keyboard and VoiceOver (focus, the on/off value, press).
+private struct ChikaSwitchStyle: ToggleStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        Button { withAnimation(.easeInOut(duration: 0.15)) { configuration.isOn.toggle() } } label: {
+            HStack(alignment: .center, spacing: 12) {
+                configuration.label
+                Spacer(minLength: 0)
+                ZStack(alignment: configuration.isOn ? .trailing : .leading) {
+                    Capsule()
+                        .fill(configuration.isOn ? Chika.ochre : Chika.ink)
+                        .overlay(Capsule().stroke(configuration.isOn ? Chika.ochre : Chika.creamMuted, lineWidth: 2))
+                    Circle()
+                        .fill(configuration.isOn ? Chika.ink : Chika.creamMuted)
+                        .padding(3)
+                }
+                .frame(width: 46, height: 28)
+            }
+            // The row's ground is inside the button, so a click anywhere on the row toggles.
+            .padding(.init(top: 12, leading: 16, bottom: 12, trailing: 10))
+            .background(Chika.inkSoft)
+            .clipShape(RoundedCornerShape(cornerRadius: 6))
+            .contentShape(Rectangle())
         }
-        .frame(width: 46, height: 28)
-        .onTapGesture { withAnimation(.easeInOut(duration: 0.15)) { isOn.toggle() } }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(.isToggle)
+        .accessibilityValue(configuration.isOn ? "On" : "Off")
     }
 }

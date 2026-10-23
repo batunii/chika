@@ -374,10 +374,7 @@ final class LibraryStore: ObservableObject {
                         progress: [String: Progress], opened: [String: Double],
                         info: [URL: ComicInfo]) -> [(series: String?, comics: [URL])] {
         let title = { (url: URL) in url.comicTitle }
-        let read = { (url: URL) -> Double in
-            guard let p = keys[url].flatMap({ progress[$0] }), p.total > 0 else { return 0 }
-            return Double(p.page + 1) / Double(p.total)
-        }
+        let read = { (url: URL) in keys[url].flatMap { progress[$0] }?.fraction ?? 0 }
         let query = query.trimmingCharacters(in: .whitespaces)
         let shown = comics
             .filter { url in
@@ -403,7 +400,7 @@ final class LibraryStore: ObservableObject {
                                 opened: [String: Double]) -> [URL] {
         comics
             .compactMap { url in keys[url].flatMap { key in progress[key].map { (url: url, p: $0, time: opened[key] ?? 0) } } }
-            .filter { ($0.p.page > 0 || $0.p.step >= 0) && $0.p.page + 1 < $0.p.total }
+            .filter { $0.p.started && $0.p.page + 1 < $0.p.total }
             .sorted { $0.time > $1.time }
             .map(\.url)
     }

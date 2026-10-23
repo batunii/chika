@@ -62,6 +62,21 @@ reading direction and Peek move from the top bar into the "…" menu; their shor
 Stepping on past the end of the comic says "End of comic" in the status line for a moment. A one-page
 issue has no scrubber, but its NEXT ISSUE (and Return) still show.
 
+## Menus
+
+The menu bar carries the shortcuts. File > Show Library (⌘N) brings the library window forward, or
+opens it if closed (there is only ever one); Import Comics… (⌘O) and Add in Place… (⇧⌘O) open the
+library's file picker while the library is in front. The Reader menu acts on the reader in front: the
+three modes (⌘1, ⌘2, ⌘3), Whole Page (⌘0), Previous and Next Page (⌘[ ⌘]), Add or Remove Bookmark
+(⌘D), Next Night Filter (⌥⌘N), Translate (⇧⌘T), Read Aloud (⇧⌘R), Peek (⇧⌘P), Edit Panels (⌘E) and
+Export Panel… (⇧⌘E); it is off while a comic opens and while its panels are being edited. Help >
+Chika Help opens the project page.
+
+In the library, ⌘F goes to the search field, which never takes the keys by itself at launch; Esc or
+its clear button empties it. While searching or showing Unread only the LOAD COMIC tile is hidden, and
+when nothing matches a button clears the search and Unread only. Hovering a card shows its whole title
+and, for a comic read in place, the file or folder it comes from.
+
 ## Reopen at launch
 
 Quitting with reader windows open and launching again reopens them, each at its saved page and panel,
@@ -274,7 +289,8 @@ comic is open in Chika."
 
 Above the library grid, a row holds the comics started (a panel or page read) but not read to the last
 page, most recently opened first (the 20 most recent); click one to carry on. The row hides when there
-are none and while the search field has text.
+are none and while the search field has text. Cards, the Unread sort and Unread only count a comic as
+started the same way, so one only opened shows an empty progress bar and its page count.
 
 ## Where the library lives
 
