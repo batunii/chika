@@ -40,6 +40,25 @@ final class ReaderAdvanceTests: XCTestCase {
         XCTAssertEqual(model.slots.page, 0)
     }
 
+    // Shortcuts' Next and Previous Panel step the reader last in front, and say so when there is none.
+    func testPanelShortcutsStepTheFrontReader() async throws {
+        ReadingProgress.set(comic, page: 0, step: -1, total: 3, rtl: false, mode: "scroll")   // no detection
+        let model = ReaderModel(comicURL: comic, settings: ChikaSettings())
+        let deadline = Date.now + 10
+        while model.state == .loading, Date.now < deadline { try await Task.sleep(for: .milliseconds(20)) }
+        let front = ShortcutTarget.reader
+        defer { ShortcutTarget.reader = front }
+
+        ShortcutTarget.reader = model
+        _ = try await NextPanelIntent().perform()
+        XCTAssertEqual(model.slots.page, 1)
+        _ = try await PreviousPanelIntent().perform()
+        XCTAssertEqual(model.slots.page, 0)
+
+        ShortcutTarget.reader = nil
+        do { _ = try await NextPanelIntent().perform(); XCTFail("stepped with no reader") } catch is ShortcutError {}
+    }
+
     // A bookmark jump frames its panel only once that page's image lands, never on the page still showing.
     func testABookmarkJumpWaitsForItsPageBeforeFramingThePanel() async throws {
         let left = Panel(left: 0, top: 0, right: 0.5, bottom: 1), right = Panel(left: 0.5, top: 0, right: 1, bottom: 1)

@@ -7,6 +7,7 @@ import ChikaCore
 struct LibraryView: View {
     @EnvironmentObject private var settings: ChikaSettings
     @Environment(\.openWindow) private var openWindow
+    @Environment(\.dismissWindow) private var dismissWindow
     @Environment(\.openSettings) private var openSettings
     @EnvironmentObject private var library: LibraryStore
     @State private var showPicker = false
@@ -86,6 +87,8 @@ struct LibraryView: View {
         .onAppear {
             progress = ReadingProgress.all()
             opened = ReadingProgress.openedMap()
+            ShortcutTarget.library = library
+            ShortcutTarget.windows = (openWindow, dismissWindow)
             for url in library.takeComicsToReopen() { openWindow(id: "reader", value: url) }
         }
         // Reader windows save progress and recency on every step; keep cards and order live.

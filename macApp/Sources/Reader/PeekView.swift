@@ -13,8 +13,8 @@ struct PeekView: View {
 
     var body: some View {
         PeekContent(model: readers.model(for: comicURL, settings: settings))
-            .onAppear { readers.attach(comicURL) }
-            .onDisappear { readers.detach(comicURL) }
+            .onAppear { readers.attach(comicURL); ShortcutTarget.peeks.insert(comicURL) }
+            .onDisappear { readers.detach(comicURL); ShortcutTarget.peeks.remove(comicURL) }
     }
 }
 
@@ -29,6 +29,7 @@ private struct PeekContent: View {
     @AppStorage("chika.peek.autoAdvanceSeconds") private var seconds = 5
     @State private var window: NSWindow?
     @FocusState private var focused: Bool
+    @Environment(\.appearsActive) private var appearsActive
 
     // The current camera's size in bitmap pixels: its ratio is the window's aspect.
     private var aspect: CGSize {
@@ -84,6 +85,7 @@ private struct PeekContent: View {
         .focusEffectDisabled()
         .focused($focused)
         .onAppear { focused = true }
+        .onChange(of: appearsActive) { if appearsActive { ShortcutTarget.reader = model } }   // as the reader does
         .onCopyCommand { model.copyItems(peek: true) }   // Edit > Copy and ⌘C: the panel shown here
         .onKeyPress(.leftArrow) { model.advance(by: -1); return .handled }
         .onKeyPress(.rightArrow) { model.advance(by: 1); return .handled }

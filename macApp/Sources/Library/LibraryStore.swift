@@ -260,6 +260,11 @@ final class LibraryStore: ObservableObject {
             .map(\.url)
     }
 
+    /// The comic opened most recently (an import counts), for Shortcuts' Open Last Comic.
+    static func lastOpened(_ comics: [URL], keys: [URL: String], opened: [String: Double]) -> URL? {
+        comics.compactMap { url in keys[url].flatMap { opened[$0] }.map { (url: url, time: $0) } }.max { $0.time < $1.time }?.url
+    }
+
     // MARK: - Read in place
 
     /// A dropped or opened folder is read in place (watched, or one comic when it holds only images);

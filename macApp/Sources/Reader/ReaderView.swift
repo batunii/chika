@@ -27,6 +27,8 @@ private struct ReaderContent: View {
     @EnvironmentObject private var library: LibraryStore
     @Environment(\.dismiss) private var dismiss
     @Environment(\.openWindow) private var openWindow
+    @Environment(\.dismissWindow) private var dismissWindow
+    @Environment(\.appearsActive) private var appearsActive
     // Manual zoom/pan layered on top of the panel-framing camera (pinch to zoom, drag to pan).
     @State private var zoom: CGFloat = 1
     @State private var steadyZoom: CGFloat = 1
@@ -124,7 +126,13 @@ private struct ReaderContent: View {
         .focusable()
         .focusEffectDisabled()
         .focused($focused)
-        .onAppear { focused = true }
+        .onAppear {
+            focused = true
+            ShortcutTarget.library = library
+            ShortcutTarget.windows = (openWindow, dismissWindow)
+        }
+        // The reader last in front is the one Shortcuts' actions step.
+        .onChange(of: appearsActive, initial: true) { if appearsActive { ShortcutTarget.reader = model } }
         .onCopyCommand { editing ? [] : model.copyItems() }   // Edit > Copy and ⌘C; not the hidden page behind the editor
         .onKeyPress(.leftArrow) { step(-1); return .handled }
         .onKeyPress(.rightArrow) { step(1); return .handled }

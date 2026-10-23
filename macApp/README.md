@@ -235,6 +235,15 @@ Playing stops by itself at the end of the comic, if the comic could not be opene
 goes out of sight (minimized, Chika hidden with ⌘H, the screen locked or asleep, the screen saver
 on), so it never reads on where you cannot see it.
 
+## Shortcuts
+
+Chika offers four actions to Shortcuts, Spotlight and Siri (so also to Raycast or a Stream Deck through
+a shortcut): **Next Panel** and **Previous Panel** step the reader window last in front, as the arrow
+keys do (a spread in Two pages, a page in Scroll), without bringing Chika forward; **Toggle Peek** opens
+or closes that reader's peek window; **Open Last Comic** brings Chika forward and opens the comic opened
+most recently (an import counts), where it was left. With no reader open, the first three fail with "No
+comic is open in Chika."
+
 ## Continue reading
 
 Above the library grid, a row holds the comics started (a panel or page read) but not read to the last
