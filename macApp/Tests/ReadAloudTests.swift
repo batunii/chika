@@ -9,7 +9,7 @@ final class ReadAloudTests: XCTestCase {
     private let english = Locale.Language(identifier: "en")
 
     private func balloon(_ original: String, translated: String? = nil) -> BalloonTranslator.Balloon {
-        .init(box: box, original: original, paper: .white, darkInk: true, translated: translated)
+        .init(box: box, original: original, language: BalloonText.languages(of: [original])[0], paper: .white, darkInk: true, translated: translated)
     }
 
     func testSpeaksTheTranslationOnlyWithTranslateOn() {

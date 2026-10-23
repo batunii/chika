@@ -230,7 +230,8 @@ private struct ReaderContent: View {
     /// each page, panel by panel. Nil until the view, its panels and its balloons' text are in, or while
     /// editing panels. A page that would not decode has no text, so its view waits and steps on.
     private var aloudLines: [BalloonSpeaker.Line]? {
-        guard speaker.isOn, !editing, !model.waitingForPage, !translator.reading, model.imagePages == model.visiblePages else { return nil }
+        guard speaker.isOn, !editing, !model.waitingForPage, !translator.reading, model.imagePages == model.visiblePages,
+              !(translator.isOn && translator.translationPending) else { return nil }   // the translation, not the original first
         let panels = model.mode == .panels
         return model.visiblePages.flatMap { page in
             let read = translator.balloons[page] ?? []

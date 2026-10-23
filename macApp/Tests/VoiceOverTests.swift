@@ -12,7 +12,7 @@ final class VoiceOverTests: XCTestCase {
     private let right = Panel(left: 0.6, top: 0.1, right: 0.9, bottom: 0.3)
 
     private func balloon(_ box: Panel, _ original: String, translated: String? = nil) -> BalloonTranslator.Balloon {
-        .init(box: box, original: original, paper: .white, darkInk: true, translated: translated)
+        .init(box: box, original: original, language: nil, paper: .white, darkInk: true, translated: translated)
     }
 
     func testPageLabels() {

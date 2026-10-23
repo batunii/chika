@@ -41,12 +41,25 @@ struct BalloonTextTests {
 
     @Test func paperIsTheCommonestColourNotTheLettering() {
         let white: [UInt8] = [250, 248, 246, 255], black: [UInt8] = [10, 10, 10, 255]
-        let sample = Array(repeating: white, count: 10).flatMap { $0 } + Array(repeating: black, count: 4).flatMap { $0 }
-        let paper = BalloonText.paperColor(rgba: sample)
+        // Anti-aliased lettering edges, in the paper's colour bin too: an average would be grey.
+        let edge: [UInt8] = [228, 228, 228, 255], darkEdge: [UInt8] = [28, 28, 30, 255]
+        func sample(_ pixels: (pixel: [UInt8], count: Int)...) -> [UInt8] { pixels.flatMap { Array(repeating: $0.pixel, count: $0.count).flatMap { $0 } } }
+        let paper = BalloonText.paperColor(rgba: sample((white, 10), (edge, 6), (black, 4)))
         #expect(paper.r == 250 && paper.g == 248 && paper.b == 246)
         #expect(BalloonText.inkIsDark(on: paper))
-        #expect(!BalloonText.inkIsDark(on: BalloonText.paperColor(rgba: black)))
+        let dark = BalloonText.paperColor(rgba: sample((black, 10), (darkEdge, 6), (white, 4)))   // light lettering on dark paper
+        #expect(dark.r == 10 && dark.g == 10 && dark.b == 10)
+        #expect(!BalloonText.inkIsDark(on: dark))
         #expect(BalloonText.paperColor(rgba: []) == (255, 255, 255))
+    }
+
+    @Test func aPageIsOneLanguageUnlessABalloonIsSureOfItsOwn() {
+        // Read alone: zh-Hant, pl and de.
+        #expect(BalloonText.languages(of: ["今日はいい天気ですね", "どこへ行こうか", "大丈夫", "BAM!", "Hm"]) == ["ja", "ja", "ja", "ja", "ja"])
+        #expect(BalloonText.languages(of: ["今日はいい天気ですね", "どこへ行こうか", "明日また会おう", "Where are we going?", "Hm"])
+                == ["ja", "ja", "ja", "en", "ja"])
+        #expect(BalloonText.languages(of: ["!?"]) == [nil])
+        #expect(BalloonText.languages(of: []).isEmpty)
     }
 
     @Test func eachBalloonIsReadWithTheRegionItOverlapsMost() {

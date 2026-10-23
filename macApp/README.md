@@ -146,25 +146,30 @@ The speech-bubble button in the reader's top bar (⇧⌘T) translates the speech
 in Panels and Two pages (not Scroll or the peek window yet). Each balloon the panel detector found
 is read with Vision's text recognition, which detects the language itself and reads vertical
 Japanese columns right to left, then translated on this Mac by Apple's Translation framework. The
-translation is drawn over the balloon on the balloon's own paper colour, shrunk to fit, and follows
-the camera, zoom and pan like the page; hover a balloon to see the original. Settings (⌘,) picks
+translation is drawn over the balloon on the balloon's own paper colour, wrapped (and only then shrunk)
+to fit, and follows the camera, zoom and pan like the page; hover a balloon to fade the translation and
+see the original lettering. Settings (⌘,) picks
 the language to translate into, the system language by default. The first translation from a
 language may ask to download it; text already in the target language and balloons without letters
-are left alone, and "can't translate" in the status line means the pair is not supported or the
-download was declined.
+are left alone, and "can't translate" in the status line means nothing on screen could be translated:
+the pair is not supported or the download was declined. A page is taken to be in one language (all its
+balloons read together, so a short "大丈夫" or "BAM!" is not mistaken for Chinese or Polish); only a
+long balloon clearly in another language keeps its own.
 
 Recognized text is stored per comic, page and balloon in the progress database (rows carry
 `BalloonReader.version`: bump it when recognition changes), translations per text, its language and
 the target language, so a page is only read and translated once. A balloon whose recognition fails is
-not stored and is read again next time. A page mixing languages is translated one language at a time. Both go when an imported comic is deleted.
+not stored and is read again next time. A page mixing languages is translated one language at a time,
+the page's main language first, and one that fails does not hold up the others. Both go when an imported comic is deleted.
 
 ## Read aloud
 
 The speaker button in the reader's top bar (⇧⌘R) reads the speech balloons out loud, one at a time,
 in Panels and Two pages (turning to Scroll or closing the window stops it). It uses Translate's text
 recognition and stored text, so a page read for one is not read again for the other: the translation
-when Translate is on and has one, else the text off the page, in a voice for that text's language (the
-system voice when there is none). The balloon being spoken is outlined. In Panels mode it reads the
+when Translate is on and has one (it waits for the view's translation rather than read the original
+first), else the text off the page, in a voice for that text's language (the system voice when there is
+none). The balloon being spoken is outlined. In Panels mode it reads the
 balloons of the panel on screen (each balloon belongs to the panel it overlaps most), in Two pages
 every balloon of the spread, panel by panel (the stored or hand-drawn panels) in reading order; then it steps on like the arrow key and carries on, to
 the end of the comic. A panel with no text gets about 1.5 s, a whole-page view a short beat. Stepping

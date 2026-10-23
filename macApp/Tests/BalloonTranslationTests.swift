@@ -107,6 +107,8 @@ final class BalloonTranslationTests: XCTestCase {
         XCTAssertEqual(ReadingProgress.balloonTexts(url, page: 0, revision: ReadingProgress.revision(url))[balloon], read.original)
         XCTAssertEqual(translator.configuration?.source?.languageCode, .japanese)
         XCTAssertEqual(translator.configuration?.target, english)
+        XCTAssertTrue(translator.translationPending)   // set with the reading's end, so Read aloud waits for the translation
+        XCTAssertEqual(translator.status, "translating…")
 
         // Stored translations come back without a session; text already in the target is left alone.
         ReadingProgress.setTranslation(url, source: read.original, from: "ja", target: "en", text: "Nice weather")
@@ -117,15 +119,18 @@ final class BalloonTranslationTests: XCTestCase {
         translator.isOn = false
         translator.show([(0, page())], of: url, revision: ReadingProgress.revision(url), rtl: false, target: english)
         XCTAssertTrue(translator.balloons.isEmpty)
-        XCTAssertNil(translator.configuration)
+        XCTAssertNil(translator.status)
+        // Kept for Translate on again: an equal configuration set again would not hand over a session.
+        XCTAssertEqual(translator.configuration?.target, english)
     }
 
-    // A page mixing languages goes out in one batch per language; text already in the target stays.
+    // A page mixing languages goes out in one batch per language, the biggest first; text already in the target stays.
     func testBatchesAreOneSourceLanguageEach() {
-        let texts = ["今日はいい天気ですね", "Where are we going tonight?", "今日はいい天気ですね", "どこへ行こうか", "!?"]
+        let texts: [(text: String, language: String?)] = [("今日はいい天気ですね", "ja"), ("Where are we going tonight?", "en"),
+                                                          ("今日はいい天気ですね", "ja"), ("どこへ行こうか", "ja"), ("!?", nil)]
         let french = BalloonTranslator.batches(texts, target: Locale.Language(identifier: "fr"))
-        XCTAssertEqual(french.map(\.source), ["en", "ja"])
-        XCTAssertEqual(french.last?.texts, ["どこへ行こうか", "今日はいい天気ですね"])
+        XCTAssertEqual(french.map(\.source), ["ja", "en"])
+        XCTAssertEqual(french.first?.texts, ["どこへ行こうか", "今日はいい天気ですね"])
         XCTAssertEqual(BalloonTranslator.batches(texts, target: Locale.Language(identifier: "en-GB")).map(\.source), ["ja"])
     }
 

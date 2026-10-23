@@ -1,6 +1,5 @@
 import SwiftUI
 import AVFoundation
-import NaturalLanguage
 import ChikaCore
 
 /// Read aloud: speaks the balloons of the view on screen one at a time with AVSpeechSynthesizer, then
@@ -50,7 +49,7 @@ final class BalloonSpeaker: NSObject, ObservableObject, AVSpeechSynthesizerDeleg
         let translated = translate ? balloon.translated : nil
         let text = translated ?? balloon.original
         guard BalloonText.isWorthTranslating(text) else { return nil }
-        let language = translated != nil ? target.minimalIdentifier : NLLanguageRecognizer.dominantLanguage(for: text)?.rawValue
+        let language = translated != nil ? target.minimalIdentifier : balloon.language
         return Line(page: page, box: balloon.box, text: text, language: language)
     }
 
@@ -152,10 +151,13 @@ struct SpokenBalloon: View {
     var body: some View {
         GeometryReader { geo in
             if let box {
+                let line = max(geo.size.height * 0.004, 2)
+                // Round Translate's label, not the detector's box, which sits inside the lettering.
+                let frame = BalloonLabels.frame(box, in: geo.size).insetBy(dx: -line, dy: -line)
                 RoundedRectangle(cornerRadius: geo.size.height * 0.02, style: .continuous)
-                    .stroke(Chika.ochre.opacity(0.85), lineWidth: max(geo.size.height * 0.004, 2))
-                    .frame(width: CGFloat(box.width) * geo.size.width, height: CGFloat(box.height) * geo.size.height)
-                    .position(x: CGFloat(box.centerX) * geo.size.width, y: CGFloat(box.centerY) * geo.size.height)
+                    .stroke(Chika.ochre.opacity(0.85), lineWidth: line)
+                    .frame(width: frame.width, height: frame.height)
+                    .position(x: frame.midX, y: frame.midY)
             }
         }
         .allowsHitTesting(false)

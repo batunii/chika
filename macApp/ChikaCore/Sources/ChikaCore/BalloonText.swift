@@ -1,4 +1,5 @@
 import Foundation
+import NaturalLanguage
 
 /// Pure helpers for reading and translating speech balloons: where to crop, how to join the
 /// recognized lines, what is worth translating and what colour to paint the translation on.
@@ -34,18 +35,36 @@ public enum BalloonText {
         return x.languageCode == y.languageCode && x.script == y.script
     }
 
-    /// The balloon's paper colour from a small RGBA sample of it (4 bytes a pixel): the average of
-    /// the most common colour, so the lettering (the minority of pixels) does not darken it.
+    /// The balloon's paper colour from a small RGBA sample of it (4 bytes a pixel): the cleanest pixel
+    /// of the most common colour, so the lettering (the minority of pixels) does not darken it. The
+    /// lettering's anti-aliased edges fall in the paper's colour too and would pull an average towards
+    /// the ink, so it is the pixel furthest from the ink: the brightest on light paper, else the darkest.
     public static func paperColor(rgba: [UInt8]) -> (r: UInt8, g: UInt8, b: UInt8) {
-        var bins: [Int: (count: Int, r: Int, g: Int, b: Int)] = [:]
+        var bins: [Int: [(r: UInt8, g: UInt8, b: UInt8)]] = [:]
         for i in stride(from: 0, to: rgba.count - 3, by: 4) {
-            let r = Int(rgba[i]), g = Int(rgba[i + 1]), b = Int(rgba[i + 2])
-            let key = (r >> 5) << 6 | (g >> 5) << 3 | b >> 5   // 8 levels a channel
-            let bin = bins[key] ?? (0, 0, 0, 0)
-            bins[key] = (bin.count + 1, bin.r + r, bin.g + g, bin.b + b)
+            let r = rgba[i], g = rgba[i + 1], b = rgba[i + 2]
+            bins[Int(r >> 5) << 6 | Int(g >> 5) << 3 | Int(b >> 5), default: []].append((r, g, b))   // 8 levels a channel
         }
         guard let top = bins.values.max(by: { $0.count < $1.count }) else { return (255, 255, 255) }
-        return (UInt8(top.r / top.count), UInt8(top.g / top.count), UInt8(top.b / top.count))
+        let byLight = top.sorted { Int($0.r) + Int($0.g) + Int($0.b) < Int($1.r) + Int($1.g) + Int($1.b) }
+        return inkIsDark(on: byLight[byLight.count / 2]) ? byLight[byLight.count - 1] : byLight[0]
+    }
+
+    /// Each of a page's balloon texts' language (BCP 47, nil when not recognized). A page is nearly
+    /// always one language, and a short balloon read alone is easily misread ("大丈夫" as Chinese,
+    /// "BAM!" as Polish, "Hm" as German), so each takes the language of all the page's text read
+    /// together, unless it is long enough and sure of its own (an English sign on a Japanese page).
+    public static func languages(of texts: [String]) -> [String?] {
+        let recognizer = NLLanguageRecognizer()
+        recognizer.processString(texts.joined(separator: "\n"))
+        let page = recognizer.dominantLanguage?.rawValue
+        return texts.map { text in
+            guard text.count >= 6 else { return page }
+            recognizer.reset()
+            recognizer.processString(text)
+            guard let own = recognizer.languageHypotheses(withMaximum: 1).first, own.value >= 0.9 else { return page }
+            return own.key.rawValue
+        }
     }
 
     /// Read aloud: the balloons read while region `step` of `regions` is on screen, in reading order.
