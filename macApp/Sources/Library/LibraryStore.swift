@@ -236,6 +236,17 @@ final class LibraryStore: ObservableObject {
         }
     }
 
+    /// The "Continue reading" row: comics started (a panel or page read) but not read to the last
+    /// page, most recently opened first.
+    static func continueReading(_ comics: [URL], keys: [URL: String], progress: [String: Progress],
+                                opened: [String: Double]) -> [URL] {
+        comics
+            .compactMap { url in keys[url].flatMap { key in progress[key].map { (url: url, p: $0, time: opened[key] ?? 0) } } }
+            .filter { ($0.p.page > 0 || $0.p.step >= 0) && $0.p.page + 1 < $0.p.total }
+            .sorted { $0.time > $1.time }
+            .map(\.url)
+    }
+
     // MARK: - Read in place
 
     /// A dropped or opened folder is watched in place; a file is imported as a copy.

@@ -278,6 +278,15 @@ final class LibraryStoreTests: XCTestCase {
         XCTAssertEqual(arrange("BET", .title), [b])
     }
 
+    func testContinueReadingListsStartedUnfinishedComicsMostRecentFirst() {
+        let urls = ["done", "older", "never", "unstarted", "panel"].map { URL(fileURLWithPath: "/c/\($0).cbz") }
+        let keys = Dictionary(uniqueKeysWithValues: urls.map { ($0, $0.lastPathComponent) })
+        let progress = ["done.cbz": Progress(page: 9, step: -1, total: 10), "older.cbz": Progress(page: 3, step: 1, total: 10),
+                        "unstarted.cbz": Progress(page: 0, step: -1, total: 10), "panel.cbz": Progress(page: 0, step: 2, total: 10)]
+        let opened = ["done.cbz": 9.0, "older.cbz": 1.0, "never.cbz": 8.0, "unstarted.cbz": 7.0, "panel.cbz": 2.0]
+        XCTAssertEqual(LibraryStore.continueReading(urls, keys: keys, progress: progress, opened: opened), [urls[4], urls[1]])
+    }
+
     func testCb7ConvertsAndPdfImportsAsIs() async throws {
         let store = LibraryStore(directory: dir, defaults: ReadingProgress.defaults)
         await store.importComic(from: try XCTUnwrap(Bundle(for: Self.self).url(forResource: "Tiny", withExtension: "cb7"))).value

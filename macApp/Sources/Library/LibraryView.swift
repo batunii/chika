@@ -211,6 +211,19 @@ struct LibraryView: View {
                 let groups = LibraryStore.arrange(library.comics, query: query, sort: sort, unreadOnly: unreadOnly,
                                                   keys: library.keys, progress: progress, opened: opened, info: library.info)
                 let shown = groups.reduce(0) { $0 + $1.comics.count }
+                let resume = query.trimmingCharacters(in: .whitespaces).isEmpty
+                    ? LibraryStore.continueReading(library.comics, keys: library.keys, progress: progress, opened: opened) : []
+                if !resume.isEmpty {
+                    KickerText("Continue Reading", size: 13, color: Chika.ochre)
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        LazyHStack(alignment: .top, spacing: 24) {
+                            ForEach(resume, id: \.self) { url in card(url).frame(width: 150) }
+                        }
+                        .padding(.bottom, 8)   // room for the cards' hard shadow
+                    }
+                    .accessibilityElement(children: .contain)
+                    .accessibilityLabel("Continue reading")
+                }
                 HStack(spacing: 14) {
                     KickerText("Your Library", size: 13, color: Chika.ochre)
                     Text(shown == library.comics.count
@@ -230,17 +243,7 @@ struct LibraryView: View {
                             .font(.anton(18)).foregroundColor(Chika.cream).padding(.top, 8)
                     }
                     LazyVGrid(columns: columns, alignment: .leading, spacing: 28) {
-                        ForEach(group.comics, id: \.self) { url in
-                            Button { openWindow(id: "reader", value: url) } label: {
-                                ComicCard(url: url, progress: library.keys[url].flatMap { progress[$0] }, info: library.info[url])
-                            }
-                            .buttonStyle(.plain)
-                            .contextMenu {
-                                Button(role: .destructive) { pendingDelete = url } label: {
-                                    Label(removalLabel(url), systemImage: "trash")
-                                }
-                            }
-                        }
+                        ForEach(group.comics, id: \.self) { url in card(url) }
                         if group.series == groups.last?.series {
                             AddTile(importing: library.importing) { pickMode = .importCopies; showPicker = true }
                         }
@@ -250,6 +253,18 @@ struct LibraryView: View {
             .padding(28)
             .frame(maxWidth: 1180)
             .frame(maxWidth: .infinity, alignment: .top)
+        }
+    }
+
+    private func card(_ url: URL) -> some View {
+        Button { openWindow(id: "reader", value: url) } label: {
+            ComicCard(url: url, progress: library.keys[url].flatMap { progress[$0] }, info: library.info[url])
+        }
+        .buttonStyle(.plain)
+        .contextMenu {
+            Button(role: .destructive) { pendingDelete = url } label: {
+                Label(removalLabel(url), systemImage: "trash")
+            }
         }
     }
 }

@@ -235,6 +235,12 @@ Playing stops by itself at the end of the comic, if the comic could not be opene
 goes out of sight (minimized, Chika hidden with ⌘H, the screen locked or asleep, the screen saver
 on), so it never reads on where you cannot see it.
 
+## Continue reading
+
+Above the library grid, a row holds the comics started (a panel or page read) but not read to the last
+page, most recently opened first; click one to carry on. The row hides when there are none and while
+the search field has text.
+
 ## Where the library lives
 
 - **Imported copies** (⌘O, or files dropped on the window) go to the Comics folder above. CBZ,
