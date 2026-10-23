@@ -37,7 +37,9 @@ sandboxed; this is the same folder and bundle id the Catalyst app used, so its l
 
 Each comic remembers its mode (the book/grid menu in the reader's top bar):
 
-- **Panels** (⌘1): the camera steps panel by panel; ← → or Space step, ⌘[ ⌘] turn pages.
+- **Panels** (⌘1): the camera steps panel by panel; ← → or Space step, ⌘[ ⌘] turn pages. A click on
+  the right or left third of the page steps too (each click of a quick pair counts), and a
+  double-click in the middle shows the whole page (⌘0).
 - **Two pages** (⌘2): facing pages side by side, mirrored for right-to-left. The cover and any
   double-page scan (wider than tall) stand alone. ← → step a spread.
 - **Scroll** (⌘3): every page in one vertical strip at the window's width, for webtoons. Swipe or
@@ -47,9 +49,10 @@ In Panels and Two pages a two-finger sideways swipe on the trackpad turns the pa
 Two pages), once per swipe: toward the left reads on, or toward the right for a right-to-left comic.
 It does nothing while the page is zoomed in or the panel editor is open; Scroll scrolls instead.
 
-To jump to a page in any mode, type its number and press Return; the status line shows the digits
-until about 1.5 s after the last one. Return with nothing typed keeps its meaning (on the last page,
-the next issue). ⌘F toggles full screen, as does View > Enter Full Screen (⌃⌘F).
+To jump to a page in any mode, type its number and press Return; the status line shows the page it
+goes to until about 1.5 s after the last digit. A number past the last page (or 0) beeps and goes to
+the nearest page; Esc clears the number. Return and Esc with nothing typed keep their meaning (on the
+last page, the next issue; close the reader). ⌘F toggles full screen, as does View > Enter Full Screen (⌃⌘F).
 
 ## Reopen at launch
 
@@ -93,7 +96,7 @@ spread in Two pages). ⇧⌘E (Export Panel…) saves that image as a PNG wherev
 Both are also in the "…" menu at the end of the top bar, and do nothing while a new page is still
 loading. The image is the decoded page without the night filter: full size up to about 5000 px
 (larger scans are halved until they fit; in Scroll the limit is on the page's width, so a long strip
-keeps its full height), and in Two pages both pages joined at the taller page's height.
+keeps its full height up to about 50 megapixels, past which it is halved too), and in Two pages both pages joined at the taller page's height.
 
 ## Panel editor
 

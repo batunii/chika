@@ -34,5 +34,7 @@ final class PageLoaderTests: XCTestCase {
 
         XCTAssertEqual(PageLoader.decodeSampled(data: data as Data, maxDim: 256, shortEdge: true)?.width, 300)
         XCTAssertLessThan(try XCTUnwrap(PageLoader.decodeSampled(data: data as Data, maxDim: 256)?.width), 300)
+        // A strip over the pixel budget is halved until it fits (900k pixels → 56k at a quarter size).
+        XCTAssertEqual(PageLoader.decodeSampled(data: data as Data, maxDim: 256, shortEdge: true, maxPixels: 100_000)?.width, 75)
     }
 }

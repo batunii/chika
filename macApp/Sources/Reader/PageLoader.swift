@@ -21,6 +21,9 @@ final class PageLoader: @unchecked Sendable {   // thread-safe: NSCache is, and 
     private let lock = NSLock()
 
     static let defaultMaxDimension = PageConstants.maxPageDimension
+    /// The most pixels one decode may produce (200 MB of RGBA). Only a long strip sampled by its short edge
+    /// gets near it: a page within the long-edge limit stays under 27 MP, so detection parity is untouched.
+    static let maxPixels = 50_000_000
 
     init(archive: ComicPages, maxDimension: Int = defaultMaxDimension) {
         self.archive = archive
@@ -43,7 +46,7 @@ final class PageLoader: @unchecked Sendable {   // thread-safe: NSCache is, and 
 
     /// Decodes [data], downsampled so its long edge fits [maxDim] using the same power-of-two rule
     /// as Android's BitmapFactory inSampleSize (so output dimensions match across platforms).
-    static func decodeSampled(data: Data, maxDim: Int, shortEdge: Bool = false) -> CGImage? {
+    static func decodeSampled(data: Data, maxDim: Int, shortEdge: Bool = false, maxPixels: Int = maxPixels) -> CGImage? {
         guard let src = CGImageSourceCreateWithData(data as CFData, [kCGImageSourceShouldCache: false] as CFDictionary)
         else { return nil }
 
@@ -53,7 +56,9 @@ final class PageLoader: @unchecked Sendable {   // thread-safe: NSCache is, and 
         let h = (props?[kCGImagePropertyPixelHeight] as? Int) ?? 0
         let longEdge = max(w, h)
 
-        let sample = computeInSampleSize(longEdge: shortEdge ? min(w, h) : longEdge, maxDim: maxDim)
+        var sample = computeInSampleSize(longEdge: shortEdge ? min(w, h) : longEdge, maxDim: maxDim)
+        // NSCache's cost limit only applies after the allocation, so a 5000×100000 strip must be halved before.
+        while w * h / (sample * sample) > maxPixels { sample *= 2 }
         // Target long edge after power-of-two sampling — equals Android's downsampled long edge.
         let targetLong = sample > 1 ? longEdge / sample : longEdge
 
@@ -64,7 +69,7 @@ final class PageLoader: @unchecked Sendable {   // thread-safe: NSCache is, and 
             kCGImageSourceThumbnailMaxPixelSize: max(targetLong, 1),
         ]
         return CGImageSourceCreateThumbnailAtIndex(src, 0, opts as CFDictionary)
-            ?? CGImageSourceCreateImageAtIndex(src, 0, nil) // fallback: full decode
+            ?? (w * h <= maxPixels ? CGImageSourceCreateImageAtIndex(src, 0, nil) : nil) // fallback: full decode
     }
 
     private static func defaultCacheBytes() -> Int {

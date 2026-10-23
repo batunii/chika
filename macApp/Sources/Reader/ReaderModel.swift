@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import os
 import ChikaCore
 
 /// How a comic is read: panel by panel behind the camera, two facing pages, or one vertical strip.
@@ -45,7 +46,10 @@ final class ReaderModel: ObservableObject {
     var title: String { comicURL.comicTitle }
 
     private var loader: PageLoader?
-    private var loadToken = 0
+    // Read on ioQueue too, so a load superseded while it waited in the queue skips its read and decode.
+    private nonisolated let loadToken = OSAllocatedUnfairLock(initialState: 0)
+    /// Scroll mode: the decoded pages the strip has on screen, so Copy and Export never decode on the main thread.
+    var stripImages: [Int: CGImage] = [:]
     // Detected panels cached per page (in the current reading direction) so back/forward and
     // prefetched pages don't re-run the detector. Cleared when the direction changes. Behind it, every
     // detection is stored in the progress database (both directions), so a reopened comic skips the detector.
@@ -143,14 +147,14 @@ final class ReaderModel: ObservableObject {
         detecting = false
         pageAlpha = 0.35   // fades up to 1 once the page renders
 
-        loadToken &+= 1
-        let token = loadToken
+        let token = loadToken.withLock { $0 &+= 1; return $0 }
         let pages = visiblePages
         let target = pages[0]
         Self.ioQueue.async {
+            guard token == self.loadToken.withLock({ $0 }) else { return }   // superseded while queued
             let images = pages.map { loader.loadPage($0) } // downsampled + LRU-cached
             DispatchQueue.main.async {
-                guard token == self.loadToken else { return } // a newer load superseded this one
+                guard token == self.loadToken.withLock({ $0 }) else { return } // a newer load superseded this one
                 self.noteWide(zip(pages, images))
                 // A page of this spread turned out to be a double page: pair again and reload.
                 if self.visiblePages != pages { self.loadPage(); return }
@@ -160,8 +164,8 @@ final class ReaderModel: ObservableObject {
                 withAnimation(.easeOut(duration: 0.28)) { self.pageAlpha = 1 }
                 guard self.mode == .panels else { self.prefetchSpread(after: pages.last!); return }
                 let img = images[0]
-                // Also when the regions came from a cache that a direction flip or a reset cleared during the load.
-                if self.slots.regions == nil || self.knownRegions(target) == nil {
+                // Also when a direction flip or a reset during the load changed the page's known panels.
+                if self.slots.regions == nil || self.knownRegions(target) != self.slots.regions {
                     // A bookmark's known panels glide in now. An undecodable page reads as one
                     // whole-page region so the reader can step past it.
                     if let known = self.knownRegions(target) {
@@ -253,14 +257,19 @@ final class ReaderModel: ObservableObject {
     func advance(by delta: Int) -> ReaderSlots.Move {
         switch mode {
         case .panels:
-            let move = withAnimation(Self.cameraTween) { slots.advance(by: delta, pageCount: pageCount) }
+            var next = slots
+            let move = next.advance(by: delta, pageCount: pageCount)
+            // A page still loading may already know its panels; framing one would show the previous page's image.
+            if move == .blocked || (move == .moved && next.onPanel && imagePages != visiblePages) { return .blocked }
+            withAnimation(Self.cameraTween) { slots = next }
             if move == .nextPage || move == .previousPage { loadPage() }
             return move
         case .spread:
-            let spreads = Spreads.pairs(pageCount: pageCount, wide: widePages)
-            let i = (spreads.firstIndex { $0.contains(slots.page) } ?? 0) + delta
-            guard spreads.indices.contains(i) else { return .blocked }
-            goToPage(spreads[i][0])
+            // The page next to the spread on screen, not an index into the pairs: a wide page found only
+            // when its spread loads re-pairs the book around that page instead of skipping one.
+            let page = delta > 0 ? visiblePages.last! + 1 : visiblePages[0] - 1
+            guard (0..<pageCount).contains(page) else { return .blocked }
+            goToPage(page)
             return delta > 0 ? .nextPage : .previousPage
         case .scroll:
             guard (0..<pageCount).contains(slots.page + delta) else { return .blocked }
@@ -276,10 +285,18 @@ final class ReaderModel: ObservableObject {
     }
 
     /// Scroll mode's page image, limited on its short edge so a tall strip keeps its width.
+    /// A row scrolled away (its task cancelled) before the queue reached it skips the read and decode.
     func scrollImage(_ index: Int) async -> CGImage? {
-        guard let loader else { return nil }
-        return await withCheckedContinuation { done in
-            Self.ioQueue.async { done.resume(returning: loader.loadPage(index, fitWidth: true)) }
+        guard let loader, !Task.isCancelled else { return nil }
+        let cancelled = OSAllocatedUnfairLock(initialState: false)
+        return await withTaskCancellationHandler {
+            await withCheckedContinuation { done in
+                Self.ioQueue.async {
+                    done.resume(returning: cancelled.withLock { $0 } ? nil : loader.loadPage(index, fitWidth: true))
+                }
+            }
+        } onCancel: {
+            cancelled.withLock { $0 = true }
         }
     }
 
@@ -301,9 +318,7 @@ final class ReaderModel: ObservableObject {
             let pages = [image, facing].compactMap { $0 }
             return Self.sideBySide(rightToLeft ? pages.reversed() : pages)
         case .scroll:
-            // shortcut: decodes on the main thread, a cache hit while the page is on screen (the strip
-            // loaded it with the same key); move to ioQueue if a copy ever stalls.
-            return loader?.loadPage(slots.page, fitWidth: true)
+            return stripImages[slots.page]
         }
     }
 
@@ -336,10 +351,12 @@ final class ReaderModel: ObservableObject {
     }
 
     func setMode(_ newMode: ReadingMode) {
-        guard newMode != mode else { return }
+        // Before the comic opens, slots hold a placeholder page 0 that persist() would save over the real position.
+        guard newMode != mode, state == .ready else { return }
+        let page = visiblePages[0]   // a spread's first page, whichever page of it a step landed on
         mode = newMode
         facing = nil
-        goToPage(slots.page)   // the whole page (or its spread), re-detected or re-paired
+        goToPage(page)   // the whole page (or its spread), re-detected or re-paired
         persist()
     }
 

@@ -42,6 +42,9 @@ private struct ReaderContent: View {
     @State private var scroll = ScrollPosition(idType: Int.self)
     @State private var scrollY: CGFloat = 0
     @State private var viewport: CGFloat = 0
+    @State private var scrollEnd = CGFloat.infinity   // the largest offset (the strip's bottom at the window's), once laid out
+    // Where the last key step is scrolling to: scrollY lags behind while it animates, so quick presses add up from here.
+    @State private var scrollTarget: CGFloat?
     // The panel editor replaces the page and both bars (so their Esc and Return shortcuts are gone).
     @State private var editing = false
     // A page number being typed: Return jumps to it; it goes 1.5 s after the last digit.
@@ -115,7 +118,7 @@ private struct ReaderContent: View {
                 Button("Read aloud") { toggleReadAloud() }
                     .keyboardShortcut("r", modifiers: [.command, .shift])
             }
-            .disabled(editing)
+            .disabled(editing || !isReady)   // while opening, a mode change would save page 1 over the saved position
             .opacity(0)
             .accessibilityHidden(true)
             // Also while editing panels. View > Enter Full Screen (⌃⌘F) comes with the window; ⌘F is the reader's own.
@@ -148,6 +151,9 @@ private struct ReaderContent: View {
             // A digit with ⌘, ⌃ or ⌥ is another shortcut's (⌘1-3 pick the mode); other scripts' digits are not page numbers.
             guard !editing, press.modifiers.isDisjoint(with: [.command, .control, .option]),
                   let digit = press.characters.first, digit.isASCII else { return .ignored }
+            // No such page: the status shows the nearest one Return goes to, or the entry starts over.
+            let number = Int(typedPage + String(digit)) ?? 0
+            if number == 0 || number > model.pageCount { NSSound.beep() }
             typedPage = PageJump.append(digit, to: typedPage, pageCount: model.pageCount)
             typedKeys += 1
             return .handled
@@ -156,7 +162,13 @@ private struct ReaderContent: View {
         .onKeyPress(.return) {
             guard !editing, let page = PageJump.page(typedPage, pageCount: model.pageCount) else { return .ignored }
             typedPage = ""
-            model.goToPage(page)
+            jump(to: page)
+            return .handled
+        }
+        // Esc cancels a typed page number; with none it closes the reader (the back button's shortcut).
+        .onKeyPress(.escape) {
+            guard !typedPage.isEmpty else { return .ignored }
+            typedPage = ""
             return .handled
         }
         .task(id: typedKeys) {
@@ -171,6 +183,9 @@ private struct ReaderContent: View {
         .onChange(of: editing) { model.editingPanels = editing }
         .onDisappear {
             model.editingPanels = false; speaker.isOn = false; translator.stop()
+            // isCurrent holds a copy of this view, and with it the speaker, translator and model: a cycle that
+            // would keep every closed reader's pages and archive in memory. onAppear sets both again.
+            speaker.isCurrent = { _ in true }; speaker.onDone = {}
             ShortcutTarget.windowClosed(model)
         }
         // Translate (and Read aloud's text) follows the pages on screen once they (and in Panels mode their panels) are in.
@@ -268,7 +283,16 @@ private struct ReaderContent: View {
     private func step(_ delta: Int) {
         guard !editing else { return }
         guard model.mode == .scroll else { model.advance(by: delta); return }
-        withAnimation(.easeOut(duration: 0.25)) { scroll.scrollTo(y: max(0, scrollY + CGFloat(delta) * viewport * 0.85)) }
+        let target = min(max(0, (scrollTarget ?? scrollY) + CGFloat(delta) * viewport * 0.85), max(scrollEnd, 0))
+        scrollTarget = target
+        withAnimation(.easeOut(duration: 0.25)) { scroll.scrollTo(y: target) }
+    }
+
+    /// A typed page or the scrubber: in Scroll also back to the top of the page already current.
+    private func jump(to page: Int) {
+        model.goToPage(page)
+        // The strip only follows page changes.
+        if model.mode == .scroll { scrollTarget = nil; scroll.scrollTo(id: page, anchor: .top) }
     }
 
     private func turn(next: Bool) {
@@ -279,7 +303,7 @@ private struct ReaderContent: View {
     @ViewBuilder
     private func readerBody(size: CGSize) -> some View {
         if model.mode == .scroll {
-            ScrollReader(model: model, position: $scroll, offset: $scrollY)
+            ScrollReader(model: model, position: $scroll, offset: $scrollY, end: $scrollEnd, target: $scrollTarget)
                 .onGeometryChange(for: CGFloat.self, of: { $0.size.height }) { viewport = $0 }
         } else {
             pagedBody(size: size)
@@ -306,8 +330,7 @@ private struct ReaderContent: View {
         .accessibilityElement(children: .contain)
         .accessibilityLabel(pageAccessibilityLabel)
         .accessibilityHint(PageAccessibility.hint)
-        // Double-click is declared first so a single click waits for it to be ruled out.
-        .onTapGesture(count: 2) { wholePage() }
+        // One gesture, so a click steps at once instead of waiting to rule out a double-click.
         .onTapGesture { location in tapZone(x: location.x, width: size.width) }
         .simultaneousGesture(
             MagnifyGesture()
@@ -411,12 +434,14 @@ private struct ReaderContent: View {
                     .background(Chika.cream.opacity(0.12))
                     .clipShape(Circle())
             }
-            .keyboardShortcut(.escape, modifiers: [])
+            // A typed page number takes Esc first (key equivalents fire before onKeyPress).
+            .keyboardShortcut(typedPage.isEmpty ? KeyboardShortcut(.escape, modifiers: []) : nil)
             .help("Close (Esc)")
             .accessibilityLabel("Back to library")
             VStack(alignment: .leading, spacing: 2) {
                 Text(model.title).font(.archivo(14, weight: 800)).foregroundColor(Chika.cream).lineLimit(1)
-                Text(typedPage.isEmpty ? pageStatus : "Go to page \(typedPage) of \(model.pageCount) · Return")
+                Text(typedPage.isEmpty ? pageStatus
+                     : "Go to page \(PageJump.page(typedPage, pageCount: model.pageCount)! + 1) of \(model.pageCount) · Return")
                     .font(.archivo(9)).tracking(1.4).foregroundColor(Chika.creamMuted)
             }
             Spacer()
@@ -575,7 +600,7 @@ private struct ReaderContent: View {
                     Text("ARROW KEYS TO READ").font(.anton(12)).tracking(2).foregroundColor(Chika.creamMuted)
                 }
                 Spacer()
-                PageCoin(page: (scrubbing ? Int(scrub.rounded()) : model.slots.page) + 1, total: model.pageCount)
+                PageCoin(page: (scrubbing ? Int(scrub.rounded()) : lastVisiblePage) + 1, total: model.pageCount)
             }
             Slider(
                 value: $scrub,
@@ -584,7 +609,7 @@ private struct ReaderContent: View {
                     if editing { scrubbing = true }
                     else {
                         scrubbing = false
-                        model.goToPage(Int(scrub.rounded()))
+                        jump(to: Int(scrub.rounded()))
                     }
                 }
             )
@@ -595,15 +620,19 @@ private struct ReaderContent: View {
         .background(LinearGradient(colors: [.clear, Chika.ink.opacity(0.97)],
                                    startPoint: .top, endPoint: .bottom))
         // Keep the scrubber in sync with programmatic page changes (clicks, keys, peek) while not scrubbing.
-        .onChange(of: model.slots.page, initial: true) { _, page in if !scrubbing { scrub = Double(page) } }
+        .onChange(of: lastVisiblePage, initial: true) { _, page in if !scrubbing { scrub = Double(page) } }
     }
 
+    /// The coin's and scrubber's page: a spread's last, whichever page of it was targeted, so the last spread reads as the end.
+    private var lastVisiblePage: Int { model.visiblePages.last ?? model.slots.page }
+
     // Click zones, matching Android: left third steps back, right third steps forward (panels are
-    // pre-ordered in reading direction, so this is RTL-agnostic). The middle third does nothing:
-    // on the Mac the chrome is always shown.
+    // pre-ordered in reading direction, so this is RTL-agnostic); every click steps, so quick clicks
+    // step twice. A double-click in the middle third shows the whole page (the chrome is always shown).
     private func tapZone(x: CGFloat, width: CGFloat) {
         if x < width / 3 { model.advance(by: -1) }
         else if x > width * 2 / 3 { model.advance(by: 1) }
+        else if NSApp.currentEvent?.clickCount == 2 { wholePage() }
     }
 
     /// Export Panel… (⇧⌘E): what is being read, saved as a PNG where the user picks.
@@ -718,6 +747,8 @@ private struct ScrollReader: View {
     @ObservedObject var model: ReaderModel
     @Binding var position: ScrollPosition
     @Binding var offset: CGFloat
+    @Binding var end: CGFloat
+    @Binding var target: CGFloat?   // a key step's destination, done once the strip stops
     @State private var top = 0
     // Only a moving strip reports its top page: layout and instant jumps (the first layout puts
     // page 1 at the top before the jump to the saved page) must not move the reading position.
@@ -738,13 +769,22 @@ private struct ScrollReader: View {
                 .scrollTargetLayout()
             }
             .scrollPosition($position, anchor: .top)
-            .onScrollGeometryChange(for: CGFloat.self, of: { $0.contentOffset.y }) { _, y in offset = y }
-            .onScrollPhaseChange { _, new in phase = new }
+            .onScrollGeometryChange(for: CGFloat.self, of: { $0.contentSize.height - $0.containerSize.height }) { _, e in end = e }
+            .onScrollGeometryChange(for: CGFloat.self, of: { $0.contentOffset.y }) { _, y in
+                offset = y
+                // A last page shorter than the window never reaches the top edge: the bottom of the strip is its turn.
+                let last = model.pageCount - 1
+                if phase != .idle, y >= end - 1, top != last { top = last; model.scrolled(to: last) }
+            }
+            .onScrollPhaseChange { _, new in
+                phase = new
+                if new == .idle { target = nil }
+            }
         }
         .onAppear { top = model.slots.page; position.scrollTo(id: top, anchor: .top) }
         // Page jumps (scrubber, ⌘[ ⌘], the peek window) scroll the strip to that page.
         .onChange(of: model.slots.page) { _, page in
-            if page != top { top = page; position.scrollTo(id: page, anchor: .top) }
+            if page != top { top = page; target = nil; position.scrollTo(id: page, anchor: .top) }
         }
     }
 }
@@ -766,7 +806,11 @@ private struct ScrollPage: View {
             }
         }
         .frame(width: width, height: width * aspect)
-        .task(id: index) { image = await model.scrollImage(index) }
+        .task(id: index) {
+            image = await model.scrollImage(index)
+            if !Task.isCancelled { model.stripImages[index] = image }   // Copy and Export take it from here
+        }
+        .onDisappear { model.stripImages[index] = nil }
         .onGeometryChange(for: Bool.self, of: { geo in
             let frame = geo.frame(in: .scrollView)
             return frame.minY <= 1 && frame.maxY > 1
