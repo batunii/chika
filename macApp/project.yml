@@ -10,7 +10,7 @@ settings:
   base:
     SWIFT_VERSION: "5.0"
     MARKETING_VERSION: "0.2.1"
-    CURRENT_PROJECT_VERSION: "1"
+    CURRENT_PROJECT_VERSION: "2"
     # Ad hoc "Sign to Run Locally" so xcodebuild works without a team. For distribution set
     # DEVELOPMENT_TEAM and CODE_SIGN_IDENTITY "Apple Development" (see README).
     CODE_SIGN_IDENTITY: "-"
@@ -98,6 +98,13 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.chakra.comicreader
         CODE_SIGN_ENTITLEMENTS: Chika.entitlements
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+    # App Store export re-signs the app and extension but not SwiftPM resource bundles, so a
+    # development-signed ZIPFoundation_ZIPFoundation.bundle fails processing (ITMS-90284). Left
+    # unsigned, the bundle is sealed as plain resources by the target's own signature.
+    postBuildScripts:
+      - name: Unsign SwiftPM resource bundles
+        basedOnDependencyAnalysis: false
+        script: rm -rf "$CODESIGNING_FOLDER_PATH"/Contents/Resources/*.bundle/Contents/_CodeSignature
 
   ChikaThumbnails:
     type: app-extension
@@ -131,6 +138,13 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.chakra.comicreader.thumbnails
         CODE_SIGN_ENTITLEMENTS: Thumbnails/Thumbnails.entitlements
+    # App Store export re-signs the app and extension but not SwiftPM resource bundles, so a
+    # development-signed ZIPFoundation_ZIPFoundation.bundle fails processing (ITMS-90284). Left
+    # unsigned, the bundle is sealed as plain resources by the target's own signature.
+    postBuildScripts:
+      - name: Unsign SwiftPM resource bundles
+        basedOnDependencyAnalysis: false
+        script: rm -rf "$CODESIGNING_FOLDER_PATH"/Contents/Resources/*.bundle/Contents/_CodeSignature
 
   ChikaTests:
     type: bundle.unit-test

@@ -99,10 +99,11 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.chakra.comicreader
         TARGETED_DEVICE_FAMILY: "1,2"
-        # Mac Catalyst: the same app on the Mac, sharing the iOS bundle ID so it's one App Store
-        # record (universal purchase). Apple silicon only — the Kotlin framework is built for
-        # macosArm64 (see scripts/build-shared.sh). "Designed for iPad" is off: Catalyst replaces it.
-        SUPPORTS_MACCATALYST: YES
+        # Mac Catalyst is off: the native macApp ships as the Mac version of this App Store record
+        # (same bundle ID, universal purchase), and only one Mac build can own it. "Designed for
+        # iPad" stays off too so the iPad app doesn't also appear on the Mac App Store. Flip
+        # SUPPORTS_MACCATALYST back to YES to build the Catalyst app (Apple silicon only).
+        SUPPORTS_MACCATALYST: NO
         DERIVE_MACCATALYST_PRODUCT_BUNDLE_IDENTIFIER: NO
         SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD: NO
         "ARCHS[sdk=macosx*]": arm64

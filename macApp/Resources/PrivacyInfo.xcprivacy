@@ -21,6 +21,18 @@
 				<string>CA92.1</string>
 			</array>
 		</dict>
+		<!-- File modification dates tell whether stored detections and converted CBZ caches are still
+		     current (ReadingProgress.revision, ComicOpener.cachedConversion): C617.1 for files in the app container, 3B52.1 for comics the user
+		     picked or a watched folder they granted. -->
+		<dict>
+			<key>NSPrivacyAccessedAPIType</key>
+			<string>NSPrivacyAccessedAPICategoryFileTimestamp</string>
+			<key>NSPrivacyAccessedAPITypeReasons</key>
+			<array>
+				<string>C617.1</string>
+				<string>3B52.1</string>
+			</array>
+		</dict>
 	</array>
 </dict>
 </plist>
